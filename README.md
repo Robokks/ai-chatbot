@@ -14,6 +14,12 @@ Get the latest build from the **[Releases page](https://github.com/Robokks/ai-ch
   inside the folder. Keep the other files next to it. The exe is unsigned, so if
   SmartScreen warns, choose **More info → Run anyway**.
 
+**No GitHub Actions? Build the APK in Google Colab:**
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Robokks/ai-chatbot/blob/ccr-85a70df3-vqfuzv/colab/build_apk.ipynb)
+Choose *Runtime → Run all*. After about 15–20 minutes the APK downloads and is saved to your
+Google Drive (`MyDrive/Chatbot`). If the repo is private, paste a read-only GitHub token when the
+notebook asks.
+
 These builds are made automatically by GitHub Actions on every push. They are signed with
 Flutter's debug key, which is fine for personal use but not for the Play Store.
 
