@@ -3,6 +3,7 @@ name: Build
 on:
   push:
     branches: [main, 'ccr-*']
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -50,3 +51,43 @@ jobs:
         with:
           name: chatbot-windows-x64
           path: chatbot-windows-x64.zip
+
+  # Publishes the builds to a GitHub Release so they can be downloaded.
+  # Branch pushes update the rolling "latest" pre-release; v* tags make a
+  # normal release.
+  release:
+    needs: [test-and-android, windows]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Rename files
+        run: |
+          mv dist/chatbot-android-apk/app-release.apk Chatbot-android.apk
+          mv dist/chatbot-windows-x64/chatbot-windows-x64.zip Chatbot-windows-x64.zip
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && format('Chatbot {0}', github.ref_name) || 'Chatbot (latest build)' }}
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+          make_latest: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            Chatbot-android.apk
+            Chatbot-windows-x64.zip
+          body: |
+            Built from ${{ github.sha }}.
+
+            **Android:** download `Chatbot-android.apk` on your phone and open it. Allow
+            "Install unknown apps" for your browser when asked.
+
+            **Windows:** download `Chatbot-windows-x64.zip`, unzip it, and run
+            `ai_chatbot.exe` inside the folder (keep the other files next to it). If
+            SmartScreen warns, choose **More info → Run anyway**.
+
+            Then open **Settings → API keys** in the app and add your Claude / ChatGPT /
+            DeepSeek key.

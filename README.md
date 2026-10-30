@@ -4,6 +4,19 @@ A clean, Claude-style AI chat app for **Android** and **Windows**, built with Fl
 Bring your own API key for **Claude, ChatGPT, DeepSeek, Gemini, OpenRouter, Groq**, or any
 OpenAI-compatible server (Ollama, LM Studio, vLLM).
 
+## Download
+
+Get the latest build from the **[Releases page](https://github.com/Robokks/ai-chatbot/releases/tag/latest)**:
+
+- **Android:** download `Chatbot-android.apk` on your phone and open it. Allow
+  "Install unknown apps" for your browser when asked.
+- **Windows:** download `Chatbot-windows-x64.zip`, unzip it, and run `ai_chatbot.exe`
+  inside the folder. Keep the other files next to it. The exe is unsigned, so if
+  SmartScreen warns, choose **More info → Run anyway**.
+
+These builds are made automatically by GitHub Actions on every push. They are signed with
+Flutter's debug key, which is fine for personal use but not for the Play Store.
+
 ## Features
 
 - **Multiple providers.** Switch models from the composer. Keys are stored encrypted on the
