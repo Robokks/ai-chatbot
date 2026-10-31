@@ -82,9 +82,12 @@ class SourceTool {
 }
 
 class ToolOutput {
-  const ToolOutput(this.text, {this.isError = false});
+  const ToolOutput(this.text, {this.isError = false, this.imageIds = const []});
   final String text;
   final bool isError;
+
+  /// Gallery pictures the tool made; shown in the chat, never sent to the AI.
+  final List<String> imageIds;
 }
 
 /// Something that offers tools: an MCP server, a UTCP manual, an A2A agent
@@ -104,6 +107,10 @@ abstract class ToolSource {
 
   /// Progress text from a long-running call, set while a call runs.
   void Function(String message)? onProgress;
+
+  /// Keeps a picture a tool returned (PNG/JPEG bytes) and returns its id,
+  /// so the chat can show it. Set by the app while a call runs.
+  Future<String?> Function(List<int> bytes, String mimeType)? saveImage;
 
   /// How long a call may take before the app gives up.
   Duration get callTimeout => const Duration(minutes: 3);

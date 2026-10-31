@@ -23,10 +23,36 @@ class BuiltinToolSource {
 
   static const _device = MethodChannel('chatbot/device');
 
+  /// Set by the app when it can make pictures (on this device or the home
+  /// server): makes one and returns its gallery id.
+  Future<String> Function(String prompt, void Function(String status)? onProgress)? makeImage;
+  bool Function()? imageAvailable;
+
+  /// Progress text from a long-running call, set while a call runs.
+  void Function(String message)? onProgress;
+
+  Duration timeoutFor(String tool) =>
+      tool == 'create_image' ? const Duration(minutes: 12) : const Duration(minutes: 1);
+
   /// Web tools can't run in the browser build (CORS).
   static bool get webToolsSupported => !kIsWeb;
 
   List<SourceTool> get tools => [
+        if (makeImage != null && (imageAvailable?.call() ?? false))
+          const SourceTool(
+            name: 'create_image',
+            description: 'Make a 512x512 picture from a description and show it to the user. '
+                'Write the description in English with the subject, style and colors, e.g. '
+                '"a red fox in autumn leaves, watercolor". The user sees the picture; you only '
+                'get a confirmation.',
+            inputSchema: {
+              'type': 'object',
+              'properties': {
+                'prompt': {'type': 'string', 'description': 'What the picture shows'},
+              },
+              'required': ['prompt'],
+            },
+          ),
         if (webToolsSupported) ...[
           const SourceTool(
             name: 'web_search',
@@ -115,9 +141,21 @@ class BuiltinToolSource {
         ),
       ];
 
+  Future<ToolOutput> _createImage(String prompt) async {
+    final make = makeImage;
+    if (make == null || !(imageAvailable?.call() ?? false)) {
+      return const ToolOutput('The image maker is not set up on this device.', isError: true);
+    }
+    if (prompt.trim().isEmpty) return const ToolOutput('Give a description of the picture.', isError: true);
+    final id = await make(prompt, onProgress);
+    return ToolOutput('The picture was made and is shown to the user (512x512). '
+        'Do not describe it as if you can see it.', imageIds: [id]);
+  }
+
   Future<ToolOutput> call(String tool, Map<String, dynamic> a) async {
     try {
       return switch (tool) {
+        'create_image' => await _createImage('${a['prompt'] ?? ''}'),
         'web_search' => await webSearch('${a['query'] ?? ''}'),
         'read_web_page' => await readWebPage('${a['url'] ?? ''}'),
         'calculator' => calculate('${a['expression'] ?? ''}'),

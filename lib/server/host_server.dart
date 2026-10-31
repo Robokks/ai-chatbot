@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 import '../data/llm/llm_provider.dart';
+import '../data/local/image_engine.dart';
 import '../data/models.dart';
 import 'host_mcp.dart';
 import 'host_protocols.dart';
@@ -74,8 +75,12 @@ class HostServer extends ChangeNotifier {
     required this.saveDevices,
     this.advertise,
     this.agents,
+    this.images,
     Random? random,
   }) : _random = random ?? Random.secure();
+
+  /// The image maker, shared at `/v1/images/...` and over MCP.
+  final HostImages? images;
 
   /// Coding agents shared over MCP (PC hosts only).
   final AgentHost? agents;
@@ -154,6 +159,7 @@ class HostServer extends ChangeNotifier {
         },
         agents: agents,
         device: () => _lastMcpDevice,
+        images: images,
       );
       try {
         await m.start(port == 0 ? 0 : port + 1);
@@ -251,6 +257,19 @@ class HostServer extends ChangeNotifier {
       }
       if (req.method == 'POST' && (path == '/v1/chat/completions' || path == '/chat/completions')) {
         return await _chat(req, device);
+      }
+      if (req.method == 'GET' && (path == '/v1/images/models' || path == '/images/models')) {
+        return await _json(res, 200, {
+          'object': 'list',
+          'data': [
+            for (final id in images?.sharedImageModels() ?? const <String>[])
+              {'id': id, 'object': 'model', 'owned_by': backend.deviceName, 'type': 'image'},
+          ],
+        });
+      }
+      if (req.method == 'POST' &&
+          (path == '/v1/images/generations' || path == '/images/generations')) {
+        return await _image(req, device);
       }
       if (req.method == 'GET' && path == '/utcp') {
         return await _json(res, 200, utcpManual(
@@ -466,6 +485,52 @@ class HostServer extends ChangeNotifier {
   }
 
   /// Adds a line to the host's recent requests list.
+  /// OpenAI-style picture request: `{prompt, model?, n: 1, size: "512x512",
+  /// response_format: "b64_json"}`.
+  Future<void> _image(HttpRequest req, PairedDevice device) async {
+    final body = await _readJson(req);
+    final host = images;
+    final shared = host?.sharedImageModels() ?? const <String>[];
+    if (host == null || shared.isEmpty) {
+      throw BridgeException('This host does not share the image maker. Turn on "Share image maker" '
+          'on the host.', status: 404, code: 'model_not_found');
+    }
+    final prompt = body['prompt'];
+    if (prompt is! String || prompt.trim().isEmpty) throw BridgeException('"prompt" is required');
+    if (prompt.length > 4000) throw BridgeException('"prompt" is too long (4000 characters at most)');
+    final model = body['model'];
+    if (model != null && (model is! String || !shared.contains(model))) {
+      throw BridgeException('Unknown image model "$model"', status: 404, code: 'model_not_found');
+    }
+    final n = body['n'] ?? 1;
+    if (n != 1) throw BridgeException('Only "n": 1 is supported');
+    final size = body['size'];
+    if (size != null && size != '512x512') throw BridgeException('Only "size": "512x512" is supported');
+    final format = body['response_format'] ?? 'b64_json';
+    if (format != 'b64_json') throw BridgeException('Only "response_format": "b64_json" is supported');
+    final seed = body['seed'];
+
+    activeRequests++;
+    notifyListeners();
+    try {
+      final image = await host.makeImage(model as String?, prompt,
+          seed: seed is int ? seed : null, device: device.name);
+      _logEntry(device.name, 'Picture', 'done', null);
+      await _json(req.response, 200, {
+        'created': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        'data': [
+          {'b64_json': base64Encode(image.png), 'seed': image.seed, 'revised_prompt': prompt},
+        ],
+      });
+    } on ImageMakerException catch (e) {
+      _logEntry(device.name, 'Picture', 'failed', null);
+      throw BridgeException(e.message, status: 500, code: 'image_failed');
+    } finally {
+      activeRequests--;
+      notifyListeners();
+    }
+  }
+
   void logEvent(String device, String what, String status) => _logEntry(device, what, status, null);
 
   void _logEntry(String device, String model, String status, int? tokens) {

@@ -32,6 +32,9 @@ class ToolRegistry extends ChangeNotifier {
   /// Web search, calculator, notes… always available, no setup.
   final BuiltinToolSource builtin;
 
+  /// Set by the app: keeps a picture a tool returned and gives its id.
+  Future<String?> Function(List<int> bytes, String mimeType)? saveImage;
+
   /// Built-in tools the user switched off.
   final Set<String> disabledBuiltins = {};
 
@@ -253,10 +256,16 @@ class ToolRegistry extends ChangeNotifier {
     final route = _routes[call.name];
     if (route?.$1 == builtinId) {
       try {
-        final out = await builtin.call(route!.$2, call.arguments).timeout(const Duration(minutes: 1));
-        return ToolResult(callId: call.id, name: call.name, text: out.text, isError: out.isError);
+        builtin.onProgress = onProgress;
+        final out = await builtin.call(route!.$2, call.arguments).timeout(builtin.timeoutFor(route.$2));
+        return ToolResult(
+            callId: call.id, name: call.name, text: out.text, isError: out.isError, imageIds: out.imageIds);
+      } on TimeoutException {
+        return ToolResult(callId: call.id, name: call.name, text: 'The tool timed out.', isError: true);
       } catch (e) {
         return ToolResult(callId: call.id, name: call.name, text: 'Tool failed: ${_friendly(e)}', isError: true);
+      } finally {
+        builtin.onProgress = null;
       }
     }
     final source = route == null ? null : _live[route.$1];
@@ -264,15 +273,18 @@ class ToolRegistry extends ChangeNotifier {
       return ToolResult(callId: call.id, name: call.name, text: 'Unknown tool "${call.name}"', isError: true);
     }
     source.onProgress = onProgress;
+    source.saveImage = saveImage;
     try {
       final out = await source.call(route!.$2, call.arguments).timeout(source.callTimeout);
-      return ToolResult(callId: call.id, name: call.name, text: out.text, isError: out.isError);
+      return ToolResult(
+          callId: call.id, name: call.name, text: out.text, isError: out.isError, imageIds: out.imageIds);
     } on TimeoutException {
       return ToolResult(callId: call.id, name: call.name, text: 'The tool timed out.', isError: true);
     } catch (e) {
       return ToolResult(callId: call.id, name: call.name, text: 'Tool failed: ${_friendly(e)}', isError: true);
     } finally {
       source.onProgress = null;
+      source.saveImage = null;
     }
   }
 

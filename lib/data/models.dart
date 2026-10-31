@@ -148,21 +148,36 @@ class ToolCall {
 
 /// What running a [ToolCall] returned.
 class ToolResult {
-  ToolResult({required this.callId, required this.name, required this.text, this.isError = false});
+  ToolResult({
+    required this.callId,
+    required this.name,
+    required this.text,
+    this.isError = false,
+    this.imageIds = const [],
+  });
 
   final String callId;
   final String name;
   final String text;
   final bool isError;
 
-  Map<String, dynamic> toJson() =>
-      {'callId': callId, 'name': name, 'text': text, if (isError) 'isError': true};
+  /// Gallery pictures made by the tool (shown in the chat only).
+  final List<String> imageIds;
+
+  Map<String, dynamic> toJson() => {
+        'callId': callId,
+        'name': name,
+        'text': text,
+        if (isError) 'isError': true,
+        if (imageIds.isNotEmpty) 'imageIds': imageIds,
+      };
 
   factory ToolResult.fromJson(Map<String, dynamic> j) => ToolResult(
         callId: j['callId'] as String,
         name: j['name'] as String,
         text: j['text'] as String,
         isError: j['isError'] as bool? ?? false,
+        imageIds: [for (final i in j['imageIds'] as List? ?? const []) '$i'],
       );
 }
 

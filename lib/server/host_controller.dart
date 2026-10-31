@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,14 +9,16 @@ import '../data/llm/llm_provider.dart';
 import '../data/models.dart';
 import '../state/app_state.dart';
 import '../tools/cli_runner.dart';
+import '../data/local/image_engine.dart';
 import 'agent_hub.dart';
+import 'host_mcp.dart';
 import 'discovery.dart';
 import 'foreground.dart';
 import 'host_server.dart';
 import 'openai_bridge.dart';
 
 /// Host mode: shares this device's models with the user's other devices.
-class HostController extends ChangeNotifier implements HostBackend {
+class HostController extends ChangeNotifier implements HostBackend, HostImages {
   HostController(this.app) {
     agents = AgentHub(
       load: () => app.storage.getSetting('host.agents'),
@@ -28,6 +31,7 @@ class HostController extends ChangeNotifier implements HostBackend {
       saveDevices: _saveDevices,
       advertise: advertiseHost,
       agents: agentsSupported ? agents : null,
+      images: this,
     )..addListener(notifyListeners);
     _load();
   }
@@ -54,6 +58,9 @@ class HostController extends ChangeNotifier implements HostBackend {
   ];
 
   bool shareLocal = true;
+
+  /// Share the image maker (when an image model is downloaded).
+  bool shareImages = true;
   final Set<ProviderKind> sharedCloud = {};
   int port = defaultHostPort;
   String _name = 'Chatbot host';
@@ -68,6 +75,7 @@ class HostController extends ChangeNotifier implements HostBackend {
     if (raw != null) {
       final j = jsonDecode(raw) as Map<String, dynamic>;
       shareLocal = j['shareLocal'] as bool? ?? true;
+      shareImages = j['shareImages'] as bool? ?? true;
       port = j['port'] as int? ?? defaultHostPort;
       sharedCloud
         ..clear()
@@ -85,6 +93,7 @@ class HostController extends ChangeNotifier implements HostBackend {
         'host.settings',
         jsonEncode({
           'shareLocal': shareLocal,
+          'shareImages': shareImages,
           'port': port,
           'cloud': [for (final k in sharedCloud) k.name],
         }),
@@ -105,6 +114,28 @@ class HostController extends ChangeNotifier implements HostBackend {
     shareLocal = v;
     await _save();
     notifyListeners();
+  }
+
+  Future<void> setShareImages(bool v) async {
+    shareImages = v;
+    await _save();
+    notifyListeners();
+  }
+
+  @override
+  List<String> sharedImageModels() {
+    final m = app.images.localModel;
+    if (!shareImages || m == null || app.images.unsupported != null) return const [];
+    return ['local-image/${m.id}'];
+  }
+
+  @override
+  Future<MadeImage> makeImage(String? model, String prompt, {int? seed, required String device}) async {
+    final m = app.images.localModel;
+    if (m == null || sharedImageModels().isEmpty) {
+      throw const ImageMakerException('The image maker is not shared.');
+    }
+    return app.images.engine.generate(await app.localModels.pathFor(m.id), prompt, seed: seed);
   }
 
   Future<void> setShareCloud(ProviderKind k, bool v) async {
@@ -134,6 +165,7 @@ class HostController extends ChangeNotifier implements HostBackend {
     error = null;
     // Not awaited: tools appear on the next request once the check is done.
     if (agentsSupported) agents.ensureDetected();
+    unawaited(app.images.refresh());
     try {
       await server.start(port: port);
       addresses = await HostServer.localAddresses();

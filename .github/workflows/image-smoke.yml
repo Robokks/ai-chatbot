@@ -1,0 +1,46 @@
+name: Image maker smoke test
+
+# Makes one real picture with SDXS on Linux x64, to prove the bundled
+# stable-diffusion.cpp runtime and our settings work end to end. The PNG is
+# uploaded as an artifact. Run by hand, or when the image engine changes.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['ccr-*']
+    paths: ['lib/data/local/image_engine.dart', '.github/workflows/image-smoke.yml', 'test/smoke/**']
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: 3.47.9
+  SDXS_URL: https://huggingface.co/concedo/sdxs-512-tinySDdistilled-GGUF/resolve/3144d898d61492f8382ffcabec055733fc5b2a0e/sdxs-512-tinySDdistilled_Q8_0.gguf
+  SDXS_SHA256: 409ab23582ee074c6b9d5395784fc0741b0599fb9d138686c69087c71678eb6a
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Download SDXS
+        run: |
+          mkdir -p "$RUNNER_TEMP/models"
+          curl -fL --retry 4 -o "$RUNNER_TEMP/models/sdxs.gguf" "$SDXS_URL"
+          echo "$SDXS_SHA256  $RUNNER_TEMP/models/sdxs.gguf" | sha256sum -c -
+      - run: flutter pub get
+      - name: Make a picture
+        env:
+          SDXS_PATH: ${{ runner.temp }}/models/sdxs.gguf
+        run: flutter test test/smoke/image_smoke_test.dart -r expanded
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: smoke-picture
+          path: build/smoke/
+          if-no-files-found: warn

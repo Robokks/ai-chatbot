@@ -178,8 +178,9 @@ final builtInImageModels = <LocalModelInfo>[
     name: 'SDXS 512',
     url: _hfAt('concedo/sdxs-512-tinySDdistilled-GGUF', '3144d898d61492f8382ffcabec055733fc5b2a0e',
         'sdxs-512-tinySDdistilled_Q8_0.gguf'),
-    sizeMb: 683,
+    sizeMb: 651,
     ramGb: 2,
+    sha256: '409ab23582ee074c6b9d5395784fc0741b0599fb9d138686c69087c71678eb6a',
     note: 'Makes a 512×512 picture from your words in a few seconds on a PC, '
         'or under a minute on most phones.',
     kind: LocalModelKind.image,

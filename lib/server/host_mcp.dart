@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:mcp_dart/mcp_dart.dart';
 
+import '../data/local/image_engine.dart';
 import '../data/models.dart';
 import '../tools/tool_source.dart';
 import 'coding_agents.dart';
@@ -30,6 +31,16 @@ abstract class AgentHost {
   });
 }
 
+/// The image maker shared by the host.
+abstract class HostImages {
+  /// Ids of the shared image models (like `local-image/sdxs-...`); empty
+  /// when the host doesn't share pictures.
+  List<String> sharedImageModels();
+
+  /// Makes one 512×512 PNG for [device].
+  Future<MadeImage> makeImage(String? model, String prompt, {int? seed, required String device});
+}
+
 /// MCP server (Streamable HTTP) exposing the host's models as tools, for
 /// Claude Desktop, Claude Code, Cursor, VS Code and other MCP clients.
 class HostMcpServer {
@@ -40,7 +51,10 @@ class HostMcpServer {
     required this.authorize,
     this.agents,
     this.device,
+    this.images,
   });
+
+  final HostImages? images;
 
   final String Function() hostName;
   final List<SharedModel> Function() models;
@@ -106,7 +120,37 @@ class HostMcpServer {
       },
     );
     _registerAgents(server);
+    _registerImages(server);
     return server;
+  }
+
+  void _registerImages(McpServer server) {
+    final host = images;
+    if (host == null || host.sharedImageModels().isEmpty) return;
+    server.registerTool(
+      'create_image',
+      description: 'Make a 512x512 picture from a description on ${hostName()} (offline image '
+          'model). Returns a PNG.',
+      inputSchema: JsonSchema.object(
+        properties: {
+          'prompt': JsonSchema.string(
+              description: 'What the picture shows, e.g. "a red fox in autumn leaves, watercolor"'),
+        },
+        required: ['prompt'],
+      ),
+      callback: (args, extra) async {
+        try {
+          final image = await host.makeImage(null, args['prompt'] as String,
+              device: device?.call() ?? 'A paired device');
+          return CallToolResult(content: [
+            ImageContent(data: base64Encode(image.png), mimeType: 'image/png'),
+            TextContent(text: 'Picture made on ${hostName()} (512x512).'),
+          ]);
+        } catch (e) {
+          return CallToolResult(content: [TextContent(text: 'Error: $e')], isError: true);
+        }
+      },
+    );
   }
 
   void _registerAgents(McpServer server) {

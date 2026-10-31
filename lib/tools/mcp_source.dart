@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:mcp_dart/mcp_dart.dart';
 
 import 'tool_source.dart';
@@ -63,18 +65,38 @@ class McpToolSource extends ToolSource {
         },
       ),
     );
-    final parts = <String>[
-      for (final c in result.content)
-        switch (c) {
-          TextContent(:final text) => text,
-          ImageContent() => '[image]',
-          AudioContent() => '[audio]',
-          _ => '[${c.runtimeType}]',
-        },
-      if (result.content.isEmpty && result.structuredContent != null)
-        prettyJson(result.structuredContent),
-    ];
-    return ToolOutput(clip(parts.join("\n")), isError: result.isError);
+    final imageIds = <String>[];
+    final parts = <String>[];
+    for (final c in result.content) {
+      switch (c) {
+        case TextContent(:final text):
+          parts.add(text);
+        case ImageContent(:final data, :final mimeType):
+          final id = await _keepImage(data, mimeType);
+          if (id != null) imageIds.add(id);
+          parts.add(id == null ? '[image]' : '[picture shown to the user]');
+        case AudioContent():
+          parts.add('[audio]');
+        default:
+          parts.add('[${c.runtimeType}]');
+      }
+    }
+    if (result.content.isEmpty && result.structuredContent != null) {
+      parts.add(prettyJson(result.structuredContent));
+    }
+    return ToolOutput(clip(parts.join("\n")), isError: result.isError, imageIds: imageIds);
+  }
+
+  Future<String?> _keepImage(String data, String mimeType) async {
+    final save = saveImage;
+    if (save == null || mimeType != 'image/png') {
+      return null;
+    }
+    try {
+      return await save(base64Decode(data), mimeType);
+    } catch (_) {
+      return null;
+    }
   }
 
   @override

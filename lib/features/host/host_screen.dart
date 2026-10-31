@@ -178,6 +178,15 @@ class _SharedModels extends StatelessWidget {
             ? 'None downloaded yet'
             : '${local.length} model${local.length == 1 ? '' : 's'} · free, runs on this device'),
       ),
+      if (state.localModels.installedImageModel != null)
+        SwitchListTile(
+          value: host.shareImages,
+          onChanged: host.setShareImages,
+          secondary: const Icon(Icons.image_outlined),
+          title: const Text('Share image maker'),
+          subtitle: Text(state.images.unsupported ??
+              '${state.localModels.installedImageModel!.name} · other devices can make pictures here'),
+        ),
       for (final k in HostController.shareableCloud)
         SwitchListTile(
           value: host.sharedCloud.contains(k),

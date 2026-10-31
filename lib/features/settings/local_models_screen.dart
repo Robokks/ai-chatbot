@@ -5,6 +5,7 @@ import '../../core/device_stats.dart';
 import '../../core/theme.dart';
 import '../../core/usage.dart';
 import '../../data/llm/local_provider.dart';
+import '../../data/local/image_engine.dart';
 import '../../data/local/local_models.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
@@ -80,17 +81,22 @@ class _LocalModelsScreenState extends State<LocalModelsScreen> {
                       builder: (context, snap) => _DeviceSummary(stats: snap.data),
                     ),
                     const SizedBox(height: 12),
-                    for (final m in store.all)
-                      _ModelCard(
+                    for (final m in store.chatModels)
+                      LocalModelCard(
                         device: _device,
                         info: m,
-                        installed: store.installed.contains(m.id),
-                        progress: store.progress[m.id],
-                        status: store.status[m.id],
-                        interrupted: store.interrupted.contains(m.id),
                         selected: state.provider == ProviderKind.local && state.model == m.id,
-                        custom: store.custom.contains(m),
                       ),
+                    if (store.imageModels.isNotEmpty) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 14, 4, 8),
+                        child: Text('Image models (for Create images)',
+                            style: TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w600, color: p.textMuted)),
+                      ),
+                      for (final m in store.imageModels)
+                        LocalModelCard(device: _device, info: m, selected: false),
+                    ],
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
@@ -188,31 +194,29 @@ void _startDownload(
 String _megabytes(int mb) =>
     mb >= 1000 ? '${(mb / 1024).toStringAsFixed(1)} GB' : '$mb MB';
 
-class _ModelCard extends StatelessWidget {
-  const _ModelCard({
+/// One model with its download, use and delete buttons. Also used on the
+/// Create images screen.
+class LocalModelCard extends StatelessWidget {
+  const LocalModelCard({
+    super.key,
     required this.device,
     required this.info,
-    required this.installed,
-    required this.progress,
-    required this.status,
-    required this.interrupted,
     required this.selected,
-    required this.custom,
   });
 
   final Future<DeviceStats> device;
   final LocalModelInfo info;
-  final bool installed;
-  final double? progress;
-  final String? status;
-  final bool interrupted;
   final bool selected;
-  final bool custom;
 
   @override
   Widget build(BuildContext context) {
     final state = AppScope.read(context);
     final store = state.localModels;
+    final installed = store.installed.contains(info.id);
+    final progress = store.progress[info.id];
+    final status = store.status[info.id];
+    final interrupted = store.interrupted.contains(info.id);
+    final custom = store.custom.contains(info);
     final p = Palette.of(context);
     final accent = Theme.of(context).colorScheme.primary;
     final downloading = progress != null;
@@ -271,6 +275,12 @@ class _ModelCard extends StatelessWidget {
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(info.note, style: const TextStyle(fontSize: 13.5)),
                       ),
+                    if (info.license != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text('Open source · ${info.license!.name} license',
+                            style: TextStyle(color: p.textMuted, fontSize: 12)),
+                      ),
                   ],
                 ),
               ),
@@ -278,7 +288,7 @@ class _ModelCard extends StatelessWidget {
               if (downloading)
                 TextButton(onPressed: () => store.cancel(info.id), child: const Text('Cancel'))
               else if (installed) ...[
-                if (!selected)
+                if (!selected && !info.isImage)
                   FilledButton(
                     style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
@@ -339,7 +349,7 @@ class _ModelCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Text(progress == null || progress == 0 ? 'Starting…' : '${(progress! * 100).round()}%',
+                  Text(progress == 0 ? 'Starting…' : '${(progress * 100).round()}%',
                       style: TextStyle(color: p.textMuted, fontSize: 12.5)),
                 ],
               ),
@@ -379,7 +389,9 @@ class _ModelCard extends StatelessWidget {
       ),
     );
     if (ok != true) return;
-    await LocalEngineHost.instance.release(await store.pathFor(info.id));
+    final path = await store.pathFor(info.id);
+    await LocalEngineHost.instance.release(path);
+    await ImageEngineHost.instance.release(path);
     await store.delete(info.id);
   }
 }

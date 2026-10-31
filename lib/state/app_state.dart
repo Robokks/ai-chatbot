@@ -7,11 +7,14 @@ import '../core/storage.dart';
 import '../data/llm/demo_provider.dart';
 import '../data/llm/llm_provider.dart';
 import '../data/llm/local_provider.dart';
+import '../data/local/image_engine.dart';
+import '../data/local/image_gallery.dart';
 import '../data/local/local_models.dart';
 import '../data/models.dart';
 import '../server/discovery.dart';
 import '../server/host_controller.dart';
 import '../tools/tool_registry.dart';
+import 'image_maker.dart';
 
 const demoMode = bool.fromEnvironment('DEMO');
 
@@ -23,6 +26,8 @@ class AppState extends ChangeNotifier {
     LlmProvider Function(ProviderSettings, String)? providerFactory,
     LocalModelStore? localModels,
     ToolRegistry? tools,
+    this._imageEngine,
+    this._gallery,
   })  : localModels = localModels ?? LocalModelStore(storage),
         tools = tools ?? ToolRegistry(storage) {
     _providerFactory = providerFactory ?? _defaultProvider;
@@ -33,6 +38,11 @@ class AppState extends ChangeNotifier {
 
   /// Host mode: sharing this device's models on the local network.
   late final HostController host = HostController(this);
+
+  /// Makes pictures on this device or the home server.
+  late final ImageMaker images = ImageMaker(this, engine: _imageEngine, gallery: _gallery);
+  final ImageEngineHost? _imageEngine;
+  final ImageGallery? _gallery;
 
   /// MCP servers, UTCP manuals, A2A agents and CLI programs the AI can use.
   final ToolRegistry tools;
@@ -87,6 +97,14 @@ class AppState extends ChangeNotifier {
         ProviderKind.anthropic;
     model = storage.getSetting('model') ?? providers[provider]!.models.firstOrNull ?? '';
     conversations = storage.loadConversations();
+    images.gallery.load();
+    tools.builtin
+      ..imageAvailable = (() => !demoMode && images.available)
+      ..makeImage = _makeImageForChat;
+    tools.saveImage = (bytes, mimeType) async => (await images.gallery
+            .add(Uint8List.fromList(bytes), prompt: '', madeOn: ''))
+        .id;
+    if (connectedHostName != null && !demoMode) unawaited(images.refresh());
     await tools.load();
     if (!demoMode) unawaited(tools.connectAll());
     if (localSupported) {
@@ -114,6 +132,21 @@ class AppState extends ChangeNotifier {
       model = providers[fallback]!.models.first;
     }
     notifyListeners();
+  }
+
+  /// The chat's create_image tool: makes a picture and returns its id.
+  Future<String> _makeImageForChat(String prompt, void Function(String)? onProgress) async {
+    void report() {
+      final s = images.status;
+      if (s != null) onProgress?.call(s);
+    }
+
+    images.addListener(report);
+    try {
+      return (await images.make(prompt)).id;
+    } finally {
+      images.removeListener(report);
+    }
   }
 
   // Settings
@@ -169,6 +202,7 @@ class AppState extends ChangeNotifier {
     await updateProviderSettings(settings);
     await storage.setSetting('network.hostName', hostName);
     if (settings.models.isNotEmpty) await selectModel(ProviderKind.network, settings.models.first);
+    unawaited(images.refresh());
   }
 
   /// Refreshes the shared model list from the paired host.
@@ -176,12 +210,14 @@ class AppState extends ChangeNotifier {
     final s = providers[ProviderKind.network]!;
     s.models = await LlmProvider.create(s, keyFor(ProviderKind.network)).listModels();
     await updateProviderSettings(s);
+    unawaited(images.refresh());
   }
 
   Future<void> disconnectHost() async {
     await setKey(ProviderKind.network, '');
     await updateProviderSettings(ProviderSettings(kind: ProviderKind.network, models: []));
     await storage.setSetting('network.hostName', null);
+    images.hostModels = const [];
     if (provider == ProviderKind.network) {
       final fallback = ProviderKind.values.firstWhere(
           (k) => k != ProviderKind.network && k != ProviderKind.custom && hasKey(k),

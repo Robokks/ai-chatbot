@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../../core/theme.dart';
+import '../../data/local/image_gallery.dart';
+import '../images/images_screen.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
 import '../../tools/tool_source.dart';
@@ -27,13 +31,16 @@ class ToolCallsView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final c in message.toolCalls)
+          for (final c in message.toolCalls) ...[
             _ToolCallTile(
               call: c,
               result: results[c.id],
               running: running && results[c.id] == null,
               source: state.tools.sourceNameFor(c.name),
             ),
+            for (final id in results[c.id]?.imageIds ?? const <String>[])
+              _ToolImage(key: ValueKey(id), id: id),
+          ],
         ],
       ),
     );
@@ -207,6 +214,65 @@ class ToolApprovalCard extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A picture made by the create_image tool, shown under its call.
+class _ToolImage extends StatefulWidget {
+  const _ToolImage({super.key, required this.id});
+  final String id;
+
+  @override
+  State<_ToolImage> createState() => _ToolImageState();
+}
+
+class _ToolImageState extends State<_ToolImage> {
+  late final ImageGallery _gallery = AppScope.read(context).images.gallery;
+  late final Future<Uint8List?> _bytes = _gallery.bytes(widget.id);
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: FutureBuilder<Uint8List?>(
+          future: _bytes,
+          builder: (context, snap) {
+            final bytes = snap.data;
+            if (bytes == null) {
+              return snap.connectionState == ConnectionState.done
+                  ? Text('Picture deleted', style: TextStyle(color: p.textMuted, fontSize: 13))
+                  : const SizedBox(height: 40);
+            }
+            final image = _gallery.images.where((i) => i.id == widget.id).firstOrNull;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 320, maxHeight: 320),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Material(
+                      child: InkWell(
+                        onTap: image == null
+                            ? null
+                            : () => showImageViewer(context,
+                                image: image, bytes: bytes, gallery: _gallery),
+                        child: Image.memory(bytes, fit: BoxFit.contain),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text('Made by AI', style: TextStyle(color: p.textMuted, fontSize: 11.5)),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

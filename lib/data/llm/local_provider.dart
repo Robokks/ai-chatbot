@@ -12,6 +12,9 @@ class LocalEngineHost {
   LocalEngineHost._();
   static final instance = LocalEngineHost._();
 
+  /// A separate host (tests).
+  factory LocalEngineHost.separate() => LocalEngineHost._();
+
   static const contextSize = 4096;
 
   LlamaEngine? _engine;
@@ -34,10 +37,18 @@ class LocalEngineHost {
 
   bool isLoaded(String path) => _engine != null && _path == path;
 
+  /// Other big models on this device (the image maker). Each is asked to
+  /// unload before a chat model loads, so only one is in memory at a time.
+  final List<Future<void> Function()> _others = [];
+  void addOtherModel(Future<void> Function() unload) => _others.add(unload);
+
   Future<LlamaEngine> engineFor(String path) async {
     if (_engine != null && _path == path) return _engine!;
     if (_loading != null && _path == path) return _loading!;
     await unload();
+    for (final other in _others) {
+      await other();
+    }
     _path = path;
     final loading = _loading = LlamaEngine.load(
       LlamaModel(ModelSource.path(path)),

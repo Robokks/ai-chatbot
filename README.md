@@ -43,6 +43,9 @@ Flutter's debug key, which is fine for personal use but not for the Play Store.
   Gemma 3 1B or Qwen 2.5 1.5B, or paste any Hugging Face `.gguf` link. It runs on the phone
   or PC through llama.cpp ([llamadart](https://pub.dev/packages/llamadart)), with no internet
   and no API key. See [Offline models](#offline-models).
+- **Create images (offline):** type a description and get a 512×512 picture, made on the
+  device by the open-source SDXS model. A PC can share it with your phone. See
+  [Create images](#create-images).
 - **Chat history** grouped by date, with search, rename and delete. It is stored locally.
 - **Claude-inspired design:** a warm palette, serif greeting, light/dark/system themes, a
   drawer on phones and a collapsible sidebar on desktop.
@@ -88,6 +91,31 @@ Open **Settings → On-device models** (or the model picker → On-device → Do
 - Images aren't supported offline. Text files and PDF text are.
 - Android needs a 64-bit phone with Android 10 or later. The model list lives in
   `lib/data/local/local_models.dart`.
+
+## Create images
+
+Open the sidebar → **Create images**. The first time, tap **Download** to get the image model
+(SDXS 512, 650 MB, open source, CreativeML Open RAIL++-M license). Then type what you want to
+see, for example *"a red fox in autumn leaves, watercolor"*, and tap **Make image**. Tap a
+picture to **Save** it or **Delete** it.
+
+- It works without internet. A picture takes a few seconds on a PC, and up to about a minute
+  on a phone.
+- You can also ask in a chat: *"draw a cat on a bike"*. The AI uses the built-in
+  **create_image** tool and the picture appears in the chat. This needs a chat model that can
+  use tools.
+- **Use the PC's image maker from your phone:** on the PC, download the image model and turn
+  on **Share this device** (**Share image maker** is on by default). Connect the phone to the
+  PC (Settings → Connect to a home server). On the phone's Create images screen, choose
+  **Make on: <PC name>**.
+- Other apps can use it too: `POST http://<host>:8484/v1/images/generations` (OpenAI style:
+  `prompt`, `size: "512x512"`, `response_format: "b64_json"`), and the MCP tool
+  `create_image`.
+- Works on Android phones with a 64-bit ARM processor from about 2018 on, and on Windows x64
+  PCs. Windows needs the latest Microsoft Visual C++ Redistributable (x64). It doesn't work in
+  the web version.
+- Pictures are made by AI and can be wrong. Don't make pictures of real people without their
+  permission.
 
 ## Home server (share models on your Wi-Fi)
 

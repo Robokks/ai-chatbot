@@ -114,14 +114,48 @@ Original TODO (all done):
    3. Chat: "ask Claude Code to …" → approve on both PCs.
 4. Tell the user the steps above in simple words.
 
-### 2B. NEW REQUEST (not planned yet): image generator, OCR for PDFs, voice cloner, on device
+### 2B-1. Image maker: DONE (this session)
+
+The user chose: image maker first, on phone + PC, with sharing; the bigger app is OK.
+- `pubspec.yaml`: `llamadart_native_runtimes: [llama_cpp, stable_diffusion]`. CI builds fine
+  with it, android-x64 included (the image runtime only runs on arm64; x64 reports "unsupported").
+- `LocalModelInfo.kind` (`chat`/`image`) and `license`. `builtInImageModels`: SDXS 512 at a pinned
+  revision (`_hfAt`), SHA-256 pinned. `store.chatModels`/`imageModels`/`installedImageModel`.
+  Chat lists only show chat models (`_syncLocalModels`); `hasKey(local)` = there are chat models.
+- `lib/data/local/image_engine.dart`: `ImageEngineHost` (shares `LocalEngineHost`'s turn lock;
+  `LocalEngineHost.addOtherModel` unloads the image model before a chat model loads, and the
+  other way round), `ImageBackend` (fakeable), `ImageJob` (Stop), `friendlyImageError`.
+  SDXS settings: 512×512, steps 1, guidance 1.
+- `lib/data/local/image_gallery.dart`: PNGs in app support `images/`, the list in setting `images.gallery`.
+- `lib/state/image_maker.dart`: `ImageMaker` (`AppState.images`) makes the picture on this device or
+  the home server (`HomeImageClient`, `lib/data/llm/home_images.dart`).
+- UI: sidebar "Create images" → `lib/features/images/images_screen.dart` (route `/images`).
+  `LocalModelCard` (public now) is reused for the download. The On-device models screen has an
+  "Image models" section.
+- Chat: the built-in tool `create_image` (`BuiltinToolSource.makeImage`/`imageAvailable`, 12 min
+  timeout). `ToolOutput`/`ToolResult.imageIds` hold gallery ids; `tool_calls_view.dart` shows them.
+  The AI only gets text. MCP tool results with PNG `ImageContent` are also saved and shown
+  (`ToolRegistry.saveImage`).
+- Host: `HostImages` (in `host_mcp.dart`), implemented by `HostController` (`shareImages`, on by
+  default). Routes `GET /v1/images/models` and `POST /v1/images/generations` (n=1, 512x512,
+  b64_json only). `/v1/models` is unchanged on purpose, so older clients don't list it as a chat
+  model. MCP tool `create_image` returns `ImageContent`.
+- Tests: `test/image_maker_test.dart`, `test/images_screen_test.dart`. The real-model check is
+  `.github/workflows/image-smoke.yml` plus `test/smoke/image_smoke_test.dart` (skipped without
+  `SDXS_PATH`), and it uploads the PNG as an artifact.
+- Widget-test gotcha: code that does real file IO must run in `tester.runAsync`, and fake
+  timers don't advance inside it, so test the making in unit tests.
+
+### 2B. Still to do from the same request: OCR for PDFs, voice cloner, on device
 
 The user wrote: "Integrate Image generator & ocr pdf voice cloner. All open source model, less space consumption model." They want plan mode first. Research so far: the `llamadart` 0.17 package the app already uses (see its README in the pub cache) supports all three.
-- **Image generation**: `ImageGenerationEngine` (stable-diffusion.cpp). Preview; Android arm64 CPU and Windows x64 are supported. It needs the runtime enabled: in `pubspec.yaml` `hooks: user_defines: llamadart: llamadart_native_runtimes: [llama_cpp, stable_diffusion]` (today it's limited to llama_cpp CPU; check the existing user_defines). That adds about 40–70 MB per target to the APK. It was validated with **SDXS** (very small, 512px, fast) and **SD-Turbo**, so SDXS is the small model to offer. Check licenses.
 - **OCR**: a small vision GGUF plus its mmproj projector through llamadart multimodal, e.g. Liquid AI **LFM2-VL-450M** (the user likes LFM) or SmolVLM-256M. Scanned PDFs need pages turned into images first; `pdfrx` is one option, but check its size. The app already pulls text from PDFs that have a text layer.
 - **Voice cloning**: llamadart has experimental `TextToSpeechEngine` with `Qwen3TtsAdapter`. Native code shows a `SPEAKER_REFERENCE` capability, so cloning from a short reference clip may work with Qwen3-TTS 0.6B Base; **check this in `lib/src/core/speech/text_to_speech.dart`**. Also add audio recording and playback packages. Safety: add a consent note, e.g. "Only clone your own voice or a voice you have permission to use", and label output as AI-generated.
 - Other ideas: run the heavy ones on the PC host and share them over the home server (the user likes that pattern), and show "Fits this device" checks (`modelFit`).
-- Next step: enter plan mode, ask the user which to do first and whether they're phone-only or the PC host too, then write the plan.
+- TTS facts (from `skills/llamadart-speech/SKILL.md` in the pub cache): the Qwen3-TTS pair is about
+  1.5 GB, output is 24 kHz mono float PCM (`result.toWavBytes()`), and `speakerReference` must be
+  encoded audio. The CI tests mention the `Qwen3-TTS-12Hz-1.7B-Base` Q4_K_M plus mmproj Q8_0 files.
+- Next step: plan mode for OCR or voice; ask the user which one.
 
 ### 2C. Older open items
 - **Termux setup guide UI and tests**: not done. The Kotlin bridge, manifest, `lib/tools/termux.dart` and the CLI wiring are done, and they compiled in CI.

@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import 'core/theme.dart';
 import 'features/home/home_shell.dart';
 import 'features/host/agents_card.dart';
+import 'features/images/images_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'server/host_controller.dart';
 import 'state/app_state.dart';
@@ -32,6 +33,7 @@ class ChatApp extends StatelessWidget {
           routes: {
             '/': (_) => const HomeShell(),
             '/settings': (_) => const SettingsScreen(),
+            '/images': (_) => const ImagesScreen(),
           },
         ),
       ),

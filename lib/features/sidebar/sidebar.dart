@@ -89,6 +89,17 @@ class _SidebarState extends State<Sidebar> {
               ),
             ),
             Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: _SidebarButton(
+                icon: Icons.image_outlined,
+                label: 'Create images',
+                onTap: () {
+                  widget.onNavigate?.call();
+                  Navigator.of(context).pushNamed('/images');
+                },
+              ),
+            ),
+            Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
               child: SizedBox(
                 height: 40,
