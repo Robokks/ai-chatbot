@@ -24,7 +24,7 @@ class AttachmentChip extends StatelessWidget {
         child: Image.memory(a.bytes!, width: 64, height: 64, fit: BoxFit.cover),
       );
     } else {
-      final isPdf = a.kind == AttachmentKind.pdf;
+      final (icon, color) = fileStyle(a);
       body = Container(
         width: 168,
         height: 64,
@@ -40,12 +40,12 @@ class AttachmentChip extends StatelessWidget {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: isPdf ? const Color(0xFFE5484D) : Palette.accent,
+                color: color,
                 borderRadius: BorderRadius.circular(8),
               ),
               alignment: Alignment.center,
               child: Icon(
-                isPdf ? Icons.picture_as_pdf_rounded : Icons.description_rounded,
+                icon,
                 color: Colors.white,
                 size: 20,
               ),
@@ -62,7 +62,7 @@ class AttachmentChip extends StatelessWidget {
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
                   const SizedBox(height: 2),
                   Text(
-                    '${isPdf ? 'PDF' : _ext(a.name)} · ${_size(a.size)}',
+                    '${a.kind == AttachmentKind.pdf ? 'PDF' : _ext(a.name)} · ${_size(a.size)}',
                     style: TextStyle(fontSize: 11.5, color: p.textMuted),
                   ),
                 ],
@@ -122,4 +122,18 @@ class AttachmentChip extends StatelessWidget {
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
     return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
   }
+}
+
+/// Icon and color for a file card, by type.
+(IconData, Color) fileStyle(Attachment a) {
+  if (a.kind == AttachmentKind.pdf) return (Icons.picture_as_pdf_rounded, const Color(0xFFE5484D));
+  final ext = a.name.contains('.') ? a.name.split('.').last.toLowerCase() : '';
+  return switch (ext) {
+    'docx' || 'docm' || 'odt' || 'rtf' => (Icons.article_rounded, const Color(0xFF2B579A)),
+    'xlsx' || 'xlsm' || 'ods' || 'csv' || 'tsv' => (Icons.table_chart_rounded, const Color(0xFF217346)),
+    'pptx' || 'pptm' || 'odp' => (Icons.slideshow_rounded, const Color(0xFFD24726)),
+    'epub' => (Icons.menu_book_rounded, const Color(0xFF7A5AA6)),
+    'zip' => (Icons.folder_zip_rounded, const Color(0xFF8A6D3B)),
+    _ => (Icons.description_rounded, Palette.accent),
+  };
 }

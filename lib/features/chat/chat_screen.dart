@@ -85,7 +85,7 @@ class _ChatScreenState extends State<ChatScreen> {
           setState(() => _dragging = false);
           final service = AttachmentService();
           _composerKey.currentState?.addFiles(() async => [
-                for (final f in d.files) await service.fromXFile(f),
+                for (final f in d.files) ...await service.fromXFileAll(f),
               ]);
         },
         child: Stack(children: [body, if (_dragging) const _DropOverlay()]),

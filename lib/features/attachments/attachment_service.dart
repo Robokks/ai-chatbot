@@ -8,6 +8,7 @@ import 'package:mime/mime.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 import '../../data/models.dart';
+import 'document_text.dart';
 
 class AttachmentException implements Exception {
   AttachmentException(this.message);
@@ -34,6 +35,7 @@ class AttachmentService {
 
   static const pickerExtensions = [
     'png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'bmp', 'pdf', ..._textExtensionsList,
+    ...documentExtensions, 'doc', 'xls', 'ppt',
   ];
   static const _textExtensionsList = [
     'txt', 'md', 'csv', 'json', 'xml', 'yaml', 'yml', 'log', 'html', 'css',
@@ -49,7 +51,7 @@ class AttachmentService {
       type: FileType.custom,
       allowedExtensions: pickerExtensions,
     );
-    return [for (final f in files) await fromBytes(f.name, await f.readAsBytes())];
+    return [for (final f in files) ...await fromBytesAll(f.name, await f.readAsBytes())];
   }
 
   Future<List<Attachment>> pickPhotos() async {
@@ -64,6 +66,44 @@ class AttachmentService {
 
   Future<Attachment> fromXFile(XFile x) async => fromBytes(x.name, await x.readAsBytes());
 
+  /// Like [fromBytesAll] for a dropped or picked [XFile].
+  Future<List<Attachment>> fromXFileAll(XFile x) async => fromBytesAll(x.name, await x.readAsBytes());
+
+  /// The file itself plus, for office files, the pictures inside it (so the
+  /// AI can see or read them too).
+  Future<List<Attachment>> fromBytesAll(String name, Uint8List bytes) async {
+    if (!isDocumentName(name)) return [await fromBytes(name, bytes)];
+    final doc = _document(name, bytes);
+    final out = [doc.$1];
+    for (final (picName, picBytes) in doc.$2) {
+      try {
+        out.add(_image('$name – $picName', picBytes));
+      } catch (_) {
+        // A picture format we can't decode (e.g. EMF): skip it.
+      }
+    }
+    return out;
+  }
+
+  (Attachment, List<(String, Uint8List)>) _document(String name, Uint8List bytes) {
+    final ExtractedDocument d;
+    try {
+      d = extractDocument(name, bytes);
+    } on DocumentException catch (e) {
+      throw AttachmentException(e.message);
+    }
+    return (
+      Attachment(
+        name: name,
+        mimeType: d.mimeType,
+        kind: AttachmentKind.text,
+        size: bytes.length,
+        text: '[${d.label}]\n${d.text}',
+      ),
+      d.pictures,
+    );
+  }
+
   Future<Attachment> fromBytes(String name, Uint8List bytes) async {
     if (bytes.length > maxFileBytes) {
       throw AttachmentException('$name is larger than 30 MB.');
@@ -73,6 +113,7 @@ class AttachmentService {
 
     if (mime.startsWith('image/')) return _image(name, bytes);
     if (mime == 'application/pdf') return _pdf(name, bytes);
+    if (isDocumentName(name)) return _document(name, bytes).$1;
     if (mime.startsWith('text/') || _textExtensions.contains(ext) || _looksLikeText(bytes)) {
       var text = utf8.decode(bytes, allowMalformed: true);
       if (text.length > maxTextChars) {

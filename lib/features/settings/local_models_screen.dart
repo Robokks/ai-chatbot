@@ -87,6 +87,24 @@ class _LocalModelsScreenState extends State<LocalModelsScreen> {
                         info: m,
                         selected: state.provider == ProviderKind.local && state.model == m.id,
                       ),
+                    if (store.visionModels.isNotEmpty) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 14, 4, 4),
+                        child: Text('Picture readers (for models that can\'t see)',
+                            style: TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w600, color: p.textMuted)),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+                        child: Text(
+                            'On-device models, DeepSeek and Groq can\'t see pictures. A picture '
+                            'reader reads the text in your photos and scans and describes them, '
+                            'without internet. If you download both, the bigger one is used.',
+                            style: TextStyle(fontSize: 12.5, color: p.textMuted)),
+                      ),
+                      for (final m in store.visionModels)
+                        LocalModelCard(device: _device, info: m, selected: false),
+                    ],
                     if (store.imageModels.isNotEmpty) ...[
                       Padding(
                         padding: const EdgeInsets.fromLTRB(4, 14, 4, 8),
@@ -288,7 +306,7 @@ class LocalModelCard extends StatelessWidget {
               if (downloading)
                 TextButton(onPressed: () => store.cancel(info.id), child: const Text('Cancel'))
               else if (installed) ...[
-                if (!selected && !info.isImage)
+                if (!selected && info.kind == LocalModelKind.chat)
                   FilledButton(
                     style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),

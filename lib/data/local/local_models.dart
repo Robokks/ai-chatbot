@@ -18,6 +18,10 @@ enum LocalModelKind {
 
   /// Makes pictures from text (stable-diffusion.cpp).
   image,
+
+  /// Reads pictures (a vision model plus its projector) for models that
+  /// can't see.
+  vision,
 }
 
 /// A GGUF model that can run on the device.
@@ -32,9 +36,17 @@ class LocalModelInfo {
     this.sha256,
     this.kind = LocalModelKind.chat,
     this.license,
+    this.projectorUrl,
+    this.projectorSha256,
   });
 
   final LocalModelKind kind;
+
+  /// Vision models: the multimodal projector (mmproj) file.
+  final String? projectorUrl;
+  final String? projectorSha256;
+
+  bool get isVision => kind == LocalModelKind.vision;
 
   /// Name and link of the model's license, shown on its card.
   final ({String name, String url})? license;
@@ -61,6 +73,8 @@ class LocalModelInfo {
         'note': note,
         if (sha256 != null) 'sha256': sha256,
         if (kind != LocalModelKind.chat) 'kind': kind.name,
+        if (projectorUrl != null) 'projectorUrl': projectorUrl,
+        if (projectorSha256 != null) 'projectorSha256': projectorSha256,
       };
 
   factory LocalModelInfo.fromJson(Map<String, dynamic> j) => LocalModelInfo(
@@ -72,6 +86,8 @@ class LocalModelInfo {
         note: j['note'] as String? ?? '',
         sha256: j['sha256'] as String?,
         kind: LocalModelKind.values.asNameMap()[j['kind']] ?? LocalModelKind.chat,
+        projectorUrl: j['projectorUrl'] as String?,
+        projectorSha256: j['projectorSha256'] as String?,
       );
 
   /// Builds an entry from a pasted link: `hf://owner/repo/file.gguf` or an
@@ -168,6 +184,35 @@ final builtInLocalModels = <LocalModelInfo>[
     sha256: '6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e',
   ),
   ...builtInImageModels,
+  ...builtInVisionModels,
+];
+
+/// Picture readers: Liquid AI's LFM2-VL describes pictures and reads the
+/// text in them, for chat models that can't see.
+final builtInVisionModels = <LocalModelInfo>[
+  LocalModelInfo(
+    id: 'LFM2-VL-450M-Q8_0',
+    name: 'LFM2-VL 450M (picture reader)',
+    url: _hf('LiquidAI/LFM2-VL-450M-GGUF', 'LFM2-VL-450M-Q8_0.gguf'),
+    projectorUrl: _hf('LiquidAI/LFM2-VL-450M-GGUF', 'mmproj-LFM2-VL-450M-Q8_0.gguf'),
+    sizeMb: 480,
+    ramGb: 1.5,
+    note: 'Small and fast. Reads text in photos and describes them, so on-device models, '
+        'DeepSeek and Groq can understand your pictures.',
+    kind: LocalModelKind.vision,
+    license: (name: 'LFM Open License v1.0', url: 'https://huggingface.co/LiquidAI/LFM2-VL-450M'),
+  ),
+  LocalModelInfo(
+    id: 'LFM2-VL-1.6B-Q8_0',
+    name: 'LFM2-VL 1.6B (picture reader)',
+    url: _hf('LiquidAI/LFM2-VL-1.6B-GGUF', 'LFM2-VL-1.6B-Q8_0.gguf'),
+    projectorUrl: _hf('LiquidAI/LFM2-VL-1.6B-GGUF', 'mmproj-LFM2-VL-1.6B-Q8_0.gguf'),
+    sizeMb: 1700,
+    ramGb: 3,
+    note: 'Better with small text, tables and handwriting. Best on a PC or a recent phone.',
+    kind: LocalModelKind.vision,
+    license: (name: 'LFM Open License v1.0', url: 'https://huggingface.co/LiquidAI/LFM2-VL-1.6B'),
+  ),
 ];
 
 /// Image models. SDXS makes a 512×512 picture in one step and is the
@@ -226,7 +271,20 @@ class LocalModelStore extends ChangeNotifier {
 
   List<LocalModelInfo> get all => [...builtInLocalModels, ...custom];
 
-  List<LocalModelInfo> get chatModels => [for (final m in all) if (!m.isImage) m];
+  List<LocalModelInfo> get chatModels => [
+        for (final m in all)
+          if (m.kind == LocalModelKind.chat) m,
+      ];
+  List<LocalModelInfo> get visionModels => [for (final m in all) if (m.isVision) m];
+
+  /// The picture reader to use: the biggest downloaded one, or null.
+  LocalModelInfo? get installedVisionModel {
+    LocalModelInfo? best;
+    for (final m in visionModels) {
+      if (installed.contains(m.id) && (best == null || m.sizeMb > best.sizeMb)) best = m;
+    }
+    return best;
+  }
   List<LocalModelInfo> get imageModels => [for (final m in all) if (m.isImage) m];
 
   /// The downloaded image model to use, or null.
@@ -257,6 +315,10 @@ class LocalModelStore extends ChangeNotifier {
     return '${(await _modelsDir()).path}${Platform.pathSeparator}$id.gguf';
   }
 
+  /// Where a vision model's projector is stored.
+  Future<String> projectorPathFor(String id) async =>
+      '${(await pathFor(id)).replaceFirst(RegExp(r'\.gguf$'), '')}.mmproj.gguf';
+
   Future<void> load() async {
     final raw = _storage?.getSetting('localModels.custom');
     if (raw != null) {
@@ -276,8 +338,17 @@ class LocalModelStore extends ChangeNotifier {
           : name.endsWith('.gguf')
               ? name.substring(0, name.length - 5)
               : '';
-      if (!_validId.hasMatch(stem)) continue;
+      if (!_validId.hasMatch(stem) || stem.endsWith('.mmproj')) continue;
       (partial ? interrupted : installed).add(stem);
+    }
+    // A vision model needs its projector too.
+    for (final m in all) {
+      if (m.projectorUrl != null &&
+          installed.contains(m.id) &&
+          !await File(await projectorPathFor(m.id)).exists()) {
+        installed.remove(m.id);
+        interrupted.add(m.id);
+      }
     }
     interrupted.removeAll(installed);
     notifyListeners();
@@ -287,7 +358,7 @@ class LocalModelStore extends ChangeNotifier {
       await _downloader.init();
       final previous = await _downloader.previous();
       for (final e in previous.entries) {
-        final m = byId(e.key);
+        final m = byId(e.key.replaceFirst(RegExp(r'\.mmproj$'), ''));
         if (m == null || installed.contains(m.id)) continue;
         if (e.value) {
           unawaited(download(m).catchError((_) {}));
@@ -318,45 +389,64 @@ class LocalModelStore extends ChangeNotifier {
     progress[m.id] = 0;
     interrupted.remove(m.id);
     notifyListeners();
-    final path = await pathFor(m.id);
-    final partPath = '$path.part';
+    // A vision model is two files: its projector (first) and the model.
+    final parts = <(String, String, String, String?)>[
+      if (m.projectorUrl != null)
+        ('${m.id}.mmproj', m.projectorUrl!, await projectorPathFor(m.id), m.projectorSha256),
+      (m.id, m.url, await pathFor(m.id), m.sha256),
+    ];
+    String? current;
     try {
-      final file = await _downloader.download(
-        id: m.id,
-        url: m.url,
-        partPath: partPath,
-        displayName: m.name,
-        onProgress: (p) {
-          progress[m.id] = p;
-          notifyListeners();
-        },
-        onStatus: (s) {
-          s == null ? status.remove(m.id) : status[m.id] = s;
-          notifyListeners();
-        },
-      );
-      status[m.id] = 'Checking file…';
-      progress[m.id] = 1;
-      notifyListeners();
-      final expected = m.sha256;
-      if (expected != null && await compute(sha256OfFile, file) != expected.toLowerCase()) {
-        await File(file).delete();
-        throw ChecksumMismatch();
+      for (var i = 0; i < parts.length; i++) {
+        final (partId, url, path, sha) = parts[i];
+        if (parts.length > 1 && await File(path).exists()) continue;
+        current = partId;
+        _activePart[m.id] = partId;
+        final label = parts.length > 1 ? 'Part ${i + 1} of ${parts.length}: ' : '';
+        final file = await _downloader.download(
+          id: partId,
+          url: url,
+          partPath: '$path.part',
+          displayName: m.name,
+          onProgress: (p) {
+            progress[m.id] = p;
+            notifyListeners();
+          },
+          onStatus: (s) {
+            s == null && label.isEmpty ? status.remove(m.id) : status[m.id] = '$label${s ?? 'downloading…'}';
+            notifyListeners();
+          },
+        );
+        status[m.id] = 'Checking file…';
+        progress[m.id] = 1;
+        notifyListeners();
+        if (sha != null && await compute(sha256OfFile, file) != sha.toLowerCase()) {
+          await File(file).delete();
+          throw ChecksumMismatch();
+        }
+        await _move(file, path);
+        progress[m.id] = 0;
       }
-      await _move(file, path);
       installed.add(m.id);
     } on DownloadCancelled {
-      await _downloader.discard(m.id, partPath);
+      if (current != null) {
+        final part = parts.firstWhere((p) => p.$1 == current);
+        await _downloader.discard(current, '${part.$3}.part');
+      }
       rethrow;
     } on DownloadInterrupted {
       interrupted.add(m.id);
       rethrow;
     } finally {
+      _activePart.remove(m.id);
       progress.remove(m.id);
       status.remove(m.id);
       notifyListeners();
     }
   }
+
+  /// The download id of the file being fetched for each model.
+  final Map<String, String> _activePart = {};
 
   static Future<void> _move(String from, String to) async {
     if (from == to) return;
@@ -368,7 +458,7 @@ class LocalModelStore extends ChangeNotifier {
     }
   }
 
-  Future<void> cancel(String id) => _downloader.cancel(id);
+  Future<void> cancel(String id) => _downloader.cancel(_activePart[id] ?? id);
 
   /// Bytes used by downloaded and partial model files.
   Future<int> bytesOnDisk() async {
@@ -388,6 +478,7 @@ class LocalModelStore extends ChangeNotifier {
   /// Throws away a stopped download's partial data.
   Future<void> discardPartial(String id) async {
     await _downloader.discard(id, '${await pathFor(id)}.part');
+    await _downloader.discard('$id.mmproj', '${await projectorPathFor(id)}.part');
     interrupted.remove(id);
     notifyListeners();
   }
@@ -411,8 +502,10 @@ class LocalModelStore extends ChangeNotifier {
   }
 
   Future<void> delete(String id) async {
-    final f = File(await pathFor(id));
-    if (await f.exists()) await f.delete();
+    for (final path in [await pathFor(id), await projectorPathFor(id)]) {
+      final f = File(path);
+      if (await f.exists()) await f.delete();
+    }
     installed.remove(id);
     notifyListeners();
   }
