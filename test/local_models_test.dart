@@ -72,6 +72,25 @@ void main() {
       expect(dir.listSync(), isEmpty);
     });
 
+    test('verifies the SHA-256 when one is pinned', () async {
+      http.StreamedResponse body() =>
+          http.StreamedResponse(Stream.value('hello'.codeUnits), 200, contentLength: 5);
+      final store = LocalModelStore(null, dir: dir, client: MockClient.streaming((_, _) async => body()));
+      // sha256("hello")
+      const good = LocalModelInfo(
+          id: 'ok', name: 'ok', url: 'https://example.com/ok.gguf', sizeMb: 1, ramGb: 1,
+          sha256: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824');
+      await store.download(good);
+      expect(store.installed, contains('ok'));
+
+      const bad = LocalModelInfo(
+          id: 'bad', name: 'bad', url: 'https://example.com/bad.gguf', sizeMb: 1, ramGb: 1,
+          sha256: '0000000000000000000000000000000000000000000000000000000000000000');
+      await expectLater(store.download(bad), throwsA(isA<ChecksumMismatch>()));
+      expect(File('${dir.path}/bad.gguf').existsSync(), isFalse);
+      expect(File('${dir.path}/bad.gguf.part').existsSync(), isFalse);
+    });
+
     test('parses hf:// and https links', () {
       final hf = LocalModelInfo.fromLink('hf://LiquidAI/LFM2-1.2B-GGUF/LFM2-1.2B-Q4_K_M.gguf');
       expect(hf.url,

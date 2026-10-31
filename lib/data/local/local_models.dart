@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -17,6 +18,7 @@ class LocalModelInfo {
     required this.sizeMb,
     required this.ramGb,
     this.note = '',
+    this.sha256,
   });
 
   /// File stem, also used as the model id in the picker.
@@ -27,6 +29,9 @@ class LocalModelInfo {
   final double ramGb;
   final String note;
 
+  /// Expected SHA-256 of the file; downloads that don't match are deleted.
+  final String? sha256;
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
@@ -34,6 +39,7 @@ class LocalModelInfo {
         'sizeMb': sizeMb,
         'ramGb': ramGb,
         'note': note,
+        if (sha256 != null) 'sha256': sha256,
       };
 
   factory LocalModelInfo.fromJson(Map<String, dynamic> j) => LocalModelInfo(
@@ -43,6 +49,7 @@ class LocalModelInfo {
         sizeMb: j['sizeMb'] as int,
         ramGb: (j['ramGb'] as num).toDouble(),
         note: j['note'] as String? ?? '',
+        sha256: j['sha256'] as String?,
       );
 
   /// Builds an entry from a pasted link: `hf://owner/repo/file.gguf` or an
@@ -59,11 +66,22 @@ class LocalModelInfo {
     if (uri == null || !uri.hasScheme || !uri.path.toLowerCase().endsWith('.gguf')) {
       throw const FormatException('Paste a link to a .gguf file');
     }
-    final file = Uri.decodeComponent(uri.pathSegments.last);
-    final id = file.substring(0, file.length - 5);
+    final id = safeModelId(Uri.decodeComponent(uri.pathSegments.last));
     return LocalModelInfo(id: id, name: id, url: url, sizeMb: 0, ramGb: 0, note: 'Custom');
   }
 }
+
+/// Turns a file name into a model id that is safe to use as a file name in
+/// the models folder: no directories, no `..`, only `[A-Za-z0-9._-]`.
+String safeModelId(String fileName) {
+  var name = fileName.split(RegExp(r'[/\\]')).last;
+  if (name.toLowerCase().endsWith('.gguf')) name = name.substring(0, name.length - 5);
+  name = name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_').replaceFirst(RegExp(r'^\.+'), '');
+  if (name.isEmpty) throw const FormatException('Invalid model file name');
+  return name.length > 120 ? name.substring(0, 120) : name;
+}
+
+final _validId = RegExp(r'^[A-Za-z0-9_-][A-Za-z0-9._-]*$');
 
 String _hf(String repo, String file) => 'https://huggingface.co/$repo/resolve/main/$file';
 
@@ -121,6 +139,12 @@ final builtInLocalModels = <LocalModelInfo>[
 
 class DownloadCancelled implements Exception {}
 
+class ChecksumMismatch implements Exception {
+  @override
+  String toString() => 'The downloaded file is damaged or not the expected model '
+      '(checksum mismatch). It was deleted.';
+}
+
 /// Downloads, imports, lists and deletes GGUF files in the app's data folder.
 class LocalModelStore extends ChangeNotifier {
   LocalModelStore(this._storage, {Directory? dir, http.Client? client})
@@ -156,8 +180,10 @@ class LocalModelStore extends ChangeNotifier {
     return d;
   }
 
-  Future<String> pathFor(String id) async =>
-      '${(await _modelsDir()).path}${Platform.pathSeparator}$id.gguf';
+  Future<String> pathFor(String id) async {
+    if (!_validId.hasMatch(id)) throw ArgumentError.value(id, 'id', 'unsafe model id');
+    return '${(await _modelsDir()).path}${Platform.pathSeparator}$id.gguf';
+  }
 
   Future<void> load() async {
     final raw = _storage?.getSetting('localModels.custom');
@@ -170,8 +196,9 @@ class LocalModelStore extends ChangeNotifier {
     installed.clear();
     await for (final f in (await _modelsDir()).list()) {
       final name = f.uri.pathSegments.last;
-      if (f is File && name.endsWith('.gguf')) {
-        installed.add(name.substring(0, name.length - 5));
+      final id = name.endsWith('.gguf') ? name.substring(0, name.length - 5) : '';
+      if (f is File && _validId.hasMatch(id)) {
+        installed.add(id);
       }
     }
     notifyListeners();
@@ -206,10 +233,13 @@ class LocalModelStore extends ChangeNotifier {
       final total = res.contentLength ?? m.sizeMb * 1024 * 1024;
       var received = 0;
       var lastNotify = DateTime.now();
+      final digest = _DigestSink();
+      final hasher = sha256.startChunkedConversion(digest);
       sink = part.openWrite();
       await for (final chunk in res.stream) {
         if (_cancelled.contains(m.id)) throw DownloadCancelled();
         sink.add(chunk);
+        hasher.add(chunk);
         received += chunk.length;
         if (DateTime.now().difference(lastNotify).inMilliseconds > 200) {
           progress[m.id] = total > 0 ? (received / total).clamp(0, 1) : 0;
@@ -219,6 +249,11 @@ class LocalModelStore extends ChangeNotifier {
       }
       await sink.close();
       sink = null;
+      hasher.close();
+      final expected = m.sha256;
+      if (expected != null && digest.value.toString() != expected.toLowerCase()) {
+        throw ChecksumMismatch();
+      }
       await part.rename(path);
       installed.add(m.id);
     } catch (_) {
@@ -238,9 +273,7 @@ class LocalModelStore extends ChangeNotifier {
 
   /// Copies a `.gguf` file the user picked into the models folder.
   Future<LocalModelInfo> importFile(String sourcePath, String fileName) async {
-    final id = fileName.toLowerCase().endsWith('.gguf')
-        ? fileName.substring(0, fileName.length - 5)
-        : fileName;
+    final id = safeModelId(fileName);
     final size = await File(sourcePath).length();
     final m = LocalModelInfo(
         id: id, name: id, url: '', sizeMb: size ~/ (1024 * 1024), ramGb: 0, note: 'Imported');
@@ -270,4 +303,14 @@ class LocalModelStore extends ChangeNotifier {
     await _saveCustom();
     notifyListeners();
   }
+}
+
+class _DigestSink implements Sink<Digest> {
+  late Digest value;
+
+  @override
+  void add(Digest data) => value = data;
+
+  @override
+  void close() {}
 }

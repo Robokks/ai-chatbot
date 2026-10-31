@@ -103,6 +103,34 @@ and a zipped Windows build as artifacts on every push.
 Release APKs are signed with the debug key by default. Before publishing, configure your own
 keystore (see [Flutter's Android release guide](https://docs.flutter.dev/deployment/android)).
 
+## Permanent signing key (one-time setup)
+
+Android only installs an update over the old app when both are signed with the **same key**.
+Without a key, each GitHub build uses a new temporary key, so you would have to uninstall the
+app (and lose its chats) before every update. Set this up once:
+
+1. Open https://colab.research.google.com, create a new notebook, paste this into a cell and run it:
+
+   ```python
+   import subprocess, base64, getpass
+   pw = getpass.getpass("Choose a keystore password (min 6 chars): ")
+   subprocess.run(["keytool", "-genkeypair", "-keystore", "upload-keystore.jks", "-alias", "upload",
+                   "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
+                   "-storepass", pw, "-keypass", pw, "-dname", "CN=Chatbot"], check=True)
+   open("keystore-base64.txt", "w").write(base64.b64encode(open("upload-keystore.jks", "rb").read()).decode())
+   from google.colab import files
+   files.download("upload-keystore.jks"); files.download("keystore-base64.txt")
+   ```
+
+2. **Back up `upload-keystore.jks` and the password somewhere safe** (e.g. a password manager).
+   If you lose them, existing installs can't be updated.
+3. On GitHub: **Settings → Secrets and variables → Actions → New repository secret**. Add:
+   - `ANDROID_KEYSTORE_BASE64`: the whole contents of `keystore-base64.txt`
+   - `ANDROID_KEYSTORE_PASSWORD`: your password
+   - `ANDROID_KEY_ALIAS`: `upload`
+4. Re-run the latest build (Actions → Build → Re-run all jobs). From then on, every APK is signed
+   with your key and installs as an update.
+
 ## Project layout
 
 ```

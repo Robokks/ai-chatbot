@@ -103,6 +103,12 @@ class LocalModelsScreen extends StatelessWidget {
             children: [
               const Text('Paste a Hugging Face link to a .gguf file. Q4_K_M files around '
                   '0.5–2 GB work best on phones.'),
+              const SizedBox(height: 8),
+              Text(
+                'Only add models from sources you trust: a malicious model file can '
+                'harm the app.',
+                style: TextStyle(fontSize: 13, color: Theme.of(ctx).colorScheme.error),
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: controller,

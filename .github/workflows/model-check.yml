@@ -1,0 +1,42 @@
+name: Check model links
+
+# Run by hand (Actions tab → Check model links → Run workflow) after editing
+# builtInLocalModels in lib/data/local/local_models.dart. It confirms every
+# built-in model file exists on Hugging Face and prints its size and SHA-256
+# to paste into the catalog.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['ccr-*']
+    paths: ['lib/data/local/local_models.dart', '.github/workflows/model-check.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Look up built-in models on Hugging Face
+        run: |
+          python3 - <<'PY'
+          import json, re, sys, urllib.request
+          src = open('lib/data/local/local_models.dart').read()
+          files = re.findall(r"_hf\('([^']+)',\s*'([^']+)'\)", src)
+          bad = 0
+          for repo, name in files:
+              url = f'https://huggingface.co/api/models/{repo}/tree/main'
+              try:
+                  tree = json.load(urllib.request.urlopen(url, timeout=60))
+              except Exception as e:
+                  print(f'MISSING-REPO {repo}/{name}: {e}'); bad += 1; continue
+              entry = next((f for f in tree if f.get('path') == name), None)
+              if not entry:
+                  ggufs = [f['path'] for f in tree if f.get('path', '').endswith('.gguf')]
+                  print(f'MISSING-FILE {repo}/{name}; available: {ggufs}'); bad += 1; continue
+              lfs = entry.get('lfs') or {}
+              size = lfs.get('size') or entry.get('size')
+              print(f"OK {repo}/{name} size={size} sha256={lfs.get('oid')}")
+          sys.exit(1 if bad else 0)
+          PY
