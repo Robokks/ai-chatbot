@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:ai_chatbot/data/llm/llm_provider.dart';
 import 'package:ai_chatbot/data/llm/local_provider.dart';
 import 'package:ai_chatbot/data/local/local_models.dart';
+import 'package:ai_chatbot/data/local/model_downloader.dart' show speedText;
 import 'package:ai_chatbot/data/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -150,6 +151,12 @@ void main() {
       expect(builtInLocalModels.first.name, startsWith('LFM2'));
       expect(builtInLocalModels.map((m) => m.id).toSet(), hasLength(builtInLocalModels.length));
     });
+  });
+
+  test('download speed text', () {
+    expect(speedText(0, Duration.zero), isNull);
+    expect(speedText(2.04, const Duration(minutes: 5, seconds: 10)), '2.0 MB/s · 5 min left');
+    expect(speedText(0.5, const Duration(seconds: 40)), '512 KB/s · 40 s left');
   });
 
   group('LocalProvider.toLlamaMessages', () {

@@ -339,7 +339,7 @@ class _ModelCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Text('${((progress ?? 0) * 100).round()}%',
+                  Text(progress == null || progress == 0 ? 'Starting…' : '${(progress! * 100).round()}%',
                       style: TextStyle(color: p.textMuted, fontSize: 12.5)),
                 ],
               ),

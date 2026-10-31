@@ -178,6 +178,8 @@ class BackgroundModelDownloader extends ModelDownloader {
       baseDirectory: BaseDirectory.applicationSupport,
       group: _group,
       displayName: displayName,
+      // The default only reports start/finish; the UI needs the percentage.
+      updates: Updates.statusAndProgress,
       retries: 5,
       stallTimeout: const Duration(seconds: 60),
       transferHints: {TransferHint.userInitiated, TransferHint.largeFile},
@@ -238,13 +240,16 @@ class BackgroundModelDownloader extends ModelDownloader {
       onStatus?.call(switch (t.holdReason) {
         TransferHoldReason.offline => 'Waiting for internet…',
         TransferHoldReason.waitingForWiFi => 'Waiting for Wi-Fi…',
-        _ => t.status == TaskStatus.waitingToRetry ? 'Connection lost, retrying…' : null,
+        _ => t.status == TaskStatus.waitingToRetry
+            ? 'Connection lost, retrying…'
+            : speedText(t.networkSpeed, t.timeRemainingNotifier.value),
       });
     }
 
     t.progressNotifier.addListener(progress);
     t.holdReasonNotifier.addListener(status);
     t.statusNotifier.addListener(status);
+    t.networkSpeedNotifier.addListener(status);
     progress();
     try {
       final r = await t.result;
@@ -258,6 +263,7 @@ class BackgroundModelDownloader extends ModelDownloader {
       t.progressNotifier.removeListener(progress);
       t.holdReasonNotifier.removeListener(status);
       t.statusNotifier.removeListener(status);
+      t.networkSpeedNotifier.removeListener(status);
     }
   }
 
@@ -281,6 +287,19 @@ class BackgroundModelDownloader extends ModelDownloader {
           t.taskId.substring(6): t.status.isNotFinalState || t.status == TaskStatus.complete,
     };
   }
+}
+
+/// "2.0 MB/s · 5 min left"; null when the speed isn't known yet.
+String? speedText(double mbPerSecond, Duration remaining) {
+  if (mbPerSecond <= 0) return null;
+  final speed = mbPerSecond >= 1
+      ? '${mbPerSecond.toStringAsFixed(1)} MB/s'
+      : '${(mbPerSecond * 1024).round()} KB/s';
+  if (remaining.isNegative || remaining == Duration.zero) return speed;
+  final left = remaining.inMinutes >= 1
+      ? '${remaining.inMinutes} min left'
+      : '${remaining.inSeconds.clamp(1, 59)} s left';
+  return '$speed · $left';
 }
 
 /// Background downloads where the platform supports them; in-app otherwise.
