@@ -3,12 +3,14 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'termux.dart';
 import 'tool_source.dart';
 
-/// Command-line tools only make sense on a PC: phones don't allow running
-/// arbitrary programs.
-bool get cliSupported =>
-    !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+/// Command-line tools run on a PC, or on Android through the Termux app.
+bool get cliSupported => desktopCli || (TermuxRunner.isAndroid && TermuxRunner.ready);
+
+/// Programs run directly on Windows, macOS and Linux.
+bool get desktopCli => !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
 /// The program name a command starts with ("C:\\x\\git.exe status" → "git").
 String programOf(String command) {

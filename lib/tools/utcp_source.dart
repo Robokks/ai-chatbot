@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import 'cli_runner.dart';
+import 'termux.dart';
 import 'tool_source.dart';
 
 /// Tools from a UTCP manual (https://www.utcp.io). HTTP tools are called
@@ -67,7 +68,7 @@ class UtcpToolSource extends ToolSource {
   }
 
   String? _cliProblem(Map<String, dynamic> tpl) {
-    if (!cliSupported) return 'command-line tools only run on a PC';
+    if (!cliSupported) return 'command-line tools need a PC, or Termux on Android';
     final commands = tpl['commands'] as List? ?? const [];
     if (commands.isEmpty) return 'no commands';
     for (final c in commands) {
@@ -215,6 +216,7 @@ class UtcpToolSource extends ToolSource {
         r'rm -f "$__out"',
       ].join('\n');
     }
+    if (!desktopCli) return TermuxRunner.instance.run('sh', ['-c', script]);
     return Platform.isWindows
         ? runProcess('powershell', ['-NoProfile', '-Command', script],
             workingDirectory: tpl['working_dir'] as String?)

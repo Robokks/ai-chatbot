@@ -1,4 +1,5 @@
 import 'cli_runner.dart';
+import 'termux.dart';
 import 'tool_source.dart';
 
 /// One allowlisted command-line program the AI may run (PC only). Every run
@@ -8,7 +9,11 @@ class CliToolSource extends ToolSource {
 
   @override
   Future<List<SourceTool>> discover() async {
-    if (!cliSupported) throw UnsupportedError('Command-line tools only run on a PC.');
+    if (!cliSupported) {
+      throw UnsupportedError(TermuxRunner.isAndroid
+          ? 'Set up Termux first (Settings → Tools → Add CLI program).'
+          : 'Command-line tools only run on a PC or with Termux on Android.');
+    }
     return [
       SourceTool(
         name: 'run',
@@ -35,7 +40,9 @@ class CliToolSource extends ToolSource {
   @override
   Future<ToolOutput> call(String tool, Map<String, dynamic> arguments) {
     final args = [for (final a in arguments['args'] as List? ?? const []) '$a'];
-    return runProcess(config.url.trim(), args, workingDirectory: arguments['cwd'] as String?);
+    final cwd = arguments['cwd'] as String?;
+    if (!desktopCli) return TermuxRunner.instance.run(config.url.trim(), args, cwd: cwd);
+    return runProcess(config.url.trim(), args, workingDirectory: cwd);
   }
 
   /// The command line shown in the approval prompt.

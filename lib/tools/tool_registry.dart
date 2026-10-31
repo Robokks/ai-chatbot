@@ -9,6 +9,7 @@ import 'a2a_source.dart';
 import 'builtin_source.dart';
 import 'cli_runner.dart';
 import 'cli_source.dart';
+import 'termux.dart';
 import 'mcp_source.dart';
 import 'tool_source.dart';
 import 'utcp_source.dart';
@@ -50,6 +51,7 @@ class ToolRegistry extends ChangeNotifier {
   bool enabled = true;
 
   Future<void> load() async {
+    await TermuxRunner.refresh();
     final raw = storage.getSetting('tools.sources');
     configs
       ..clear()
