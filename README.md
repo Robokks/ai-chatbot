@@ -9,7 +9,8 @@ OpenAI-compatible server (Ollama, LM Studio, vLLM).
 Get the latest build from the **[Releases page](https://github.com/Robokks/ai-chatbot/releases/tag/latest)**:
 
 - **Android:** download `Chatbot-android.apk` on your phone and open it. Allow
-  "Install unknown apps" for your browser when asked.
+  "Install unknown apps" for your browser when asked. `Chatbot-android-x86_64.apk` is only
+  for emulators and Intel Chromebooks.
 - **Windows:** download `Chatbot-windows-x64.zip`, unzip it, and run `ai_chatbot.exe`
   inside the folder. Keep the other files next to it. The exe is unsigned, so if
   SmartScreen warns, choose **More info → Run anyway**.
@@ -91,7 +92,7 @@ Open **Settings → On-device models** (or the model picker → On-device → Do
 ## Building releases
 
 ```bash
-flutter build apk --release --target-platform android-arm64,android-x64
+flutter build apk --release --split-per-abi --target-platform android-arm64,android-x64
 flutter build appbundle --release  # Play Store
 flutter build windows --release    # build/windows/x64/runner/Release/ (run on Windows)
 ```

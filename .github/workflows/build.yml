@@ -27,11 +27,15 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
-      - run: flutter build apk --release --target-platform android-arm64,android-x64
+      # One APK per CPU type keeps each download small.
+      - run: flutter build apk --release --split-per-abi --target-platform android-arm64,android-x64
+      - run: ls -la build/app/outputs/flutter-apk/
       - uses: actions/upload-artifact@v4
         with:
           name: chatbot-android-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: |
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/app-x86_64-release.apk
 
   windows:
     runs-on: windows-latest
@@ -67,7 +71,8 @@ jobs:
           path: dist
       - name: Rename files
         run: |
-          mv dist/chatbot-android-apk/app-release.apk Chatbot-android.apk
+          mv dist/chatbot-android-apk/app-arm64-v8a-release.apk Chatbot-android.apk
+          mv dist/chatbot-android-apk/app-x86_64-release.apk Chatbot-android-x86_64.apk
           mv dist/chatbot-windows-x64/chatbot-windows-x64.zip Chatbot-windows-x64.zip
       - uses: softprops/action-gh-release@v2
         with:
@@ -78,12 +83,14 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: |
             Chatbot-android.apk
+            Chatbot-android-x86_64.apk
             Chatbot-windows-x64.zip
           body: |
             Built from ${{ github.sha }}.
 
             **Android:** download `Chatbot-android.apk` on your phone and open it. Allow
-            "Install unknown apps" for your browser when asked.
+            "Install unknown apps" for your browser when asked. (`Chatbot-android-x86_64.apk`
+            is only for emulators and Intel Chromebooks.)
 
             **Windows:** download `Chatbot-windows-x64.zip`, unzip it, and run
             `ai_chatbot.exe` inside the folder (keep the other files next to it). If

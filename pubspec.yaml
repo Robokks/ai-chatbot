@@ -96,8 +96,16 @@ flutter_launcher_icons:
     theme_color: "#C96442"
 
 # On-device models use GGUF through llama.cpp only; skip the LiteRT-LM runtime
-# to keep the app smaller.
+# to keep the app smaller. On Android llama.cpp runs on the CPU (its Vulkan
+# backend is experimental there), so only the CPU modules are bundled.
 hooks:
   user_defines:
     llamadart:
       llamadart_native_runtimes: [llama_cpp]
+      llamadart_native_backends:
+        platforms:
+          android-arm64:
+            backends: [cpu]
+            cpu_profile: compact
+          android-x64:
+            backends: [cpu]
