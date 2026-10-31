@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
+import '../host/connect_screen.dart';
 import '../settings/local_models_screen.dart';
 import '../settings/settings_screen.dart';
 
@@ -50,6 +51,8 @@ class ModelPill extends StatelessWidget {
 
 /// "claude-sonnet-5-5" → "Claude Sonnet 5.5"; other ids are returned as is.
 String prettyModel(String id) {
+  // Home-server and OpenRouter ids look like "anthropic/claude-sonnet-5-5".
+  if (id.contains('/')) id = id.substring(id.lastIndexOf('/') + 1);
   final m = RegExp(r'^claude-([a-z]+)-(\d+)(?:-(\d+))?$').firstMatch(id);
   if (m == null) return id;
   final family = m[1]![0].toUpperCase() + m[1]!.substring(1);
@@ -116,7 +119,16 @@ class _ModelList extends StatelessWidget {
                   style: TextStyle(color: p.textMuted, fontSize: 12.5),
                 ),
                 const Spacer(),
-                if (k == ProviderKind.local)
+                if (k == ProviderKind.network)
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      Navigator.of(context).push(MaterialPageRoute<void>(
+                          builder: (_) => const ConnectScreen()));
+                    },
+                    child: Text(state.hasKey(k) ? 'Manage' : 'Connect'),
+                  )
+                else if (k == ProviderKind.local)
                   TextButton(
                     onPressed: () {
                       Navigator.pop(context);
@@ -217,6 +229,7 @@ class ProviderAvatar extends StatelessWidget {
     ProviderKind.openrouter: Color(0xFF6566F1),
     ProviderKind.groq: Color(0xFFF55036),
     ProviderKind.local: Color(0xFF3F7D58),
+    ProviderKind.network: Color(0xFF8A6D3B),
     ProviderKind.custom: Color(0xFF7A7A7A),
   };
 

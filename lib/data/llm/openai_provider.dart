@@ -15,6 +15,7 @@ class OpenAiProvider extends LlmProvider {
         ProviderKind.openai,
         ProviderKind.deepseek,
         ProviderKind.openrouter,
+        ProviderKind.network,
       }.contains(kind);
 
   Map<String, String> get _headers => {

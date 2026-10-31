@@ -9,6 +9,8 @@ import '../data/llm/llm_provider.dart';
 import '../data/llm/local_provider.dart';
 import '../data/local/local_models.dart';
 import '../data/models.dart';
+import '../server/discovery.dart';
+import '../server/host_controller.dart';
 
 const demoMode = bool.fromEnvironment('DEMO');
 
@@ -25,6 +27,9 @@ class AppState extends ChangeNotifier {
   }
 
   final Storage storage;
+
+  /// Host mode: sharing this device's models on the local network.
+  late final HostController host = HostController(this);
 
   /// GGUF models downloaded to this device.
   final LocalModelStore localModels;
@@ -132,6 +137,49 @@ class AppState extends ChangeNotifier {
   Future<void> updateProviderSettings(ProviderSettings s) async {
     providers[s.kind] = s;
     await storage.saveProviderSettings(s);
+    notifyListeners();
+  }
+
+  /// A provider ready to chat with [k] using its saved settings and key.
+  LlmProvider providerFor(ProviderKind k) => _providerFactory(providers[k]!, keyFor(k));
+
+  /// Name of the host this device is paired with, if any.
+  String? get connectedHostName => storage.getSetting('network.hostName');
+
+  /// Pairs with a host on the local network and loads the models it shares.
+  Future<void> connectToHost(Uri base, String pin, String hostName, String deviceName) async {
+    final key = await pairWithHost(base, pin, deviceName);
+    final settings = ProviderSettings(
+      kind: ProviderKind.network,
+      baseUrl: base.replace(path: '/v1').toString(),
+      models: [],
+    );
+    providers[ProviderKind.network] = settings;
+    await setKey(ProviderKind.network, key);
+    settings.models = await LlmProvider.create(settings, key).listModels();
+    await updateProviderSettings(settings);
+    await storage.setSetting('network.hostName', hostName);
+    if (settings.models.isNotEmpty) await selectModel(ProviderKind.network, settings.models.first);
+  }
+
+  /// Refreshes the shared model list from the paired host.
+  Future<void> refreshHostModels() async {
+    final s = providers[ProviderKind.network]!;
+    s.models = await LlmProvider.create(s, keyFor(ProviderKind.network)).listModels();
+    await updateProviderSettings(s);
+  }
+
+  Future<void> disconnectHost() async {
+    await setKey(ProviderKind.network, '');
+    await updateProviderSettings(ProviderSettings(kind: ProviderKind.network, models: []));
+    await storage.setSetting('network.hostName', null);
+    if (provider == ProviderKind.network) {
+      final fallback = ProviderKind.values.firstWhere(
+          (k) => k != ProviderKind.network && k != ProviderKind.custom && hasKey(k),
+          orElse: () => ProviderKind.anthropic);
+      final models = providers[fallback]!.models;
+      await selectModel(fallback, models.isEmpty ? '' : models.first);
+    }
     notifyListeners();
   }
 

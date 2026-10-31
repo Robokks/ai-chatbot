@@ -3,8 +3,11 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../server/host_controller.dart';
 import '../../state/app_state.dart';
 import '../chat/model_picker.dart';
+import '../host/connect_screen.dart';
+import '../host/host_screen.dart';
 import 'local_models_screen.dart';
 import 'usage_screen.dart';
 
@@ -45,11 +48,45 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ],
+          const _SectionTitle('Home network'),
+          _Card(
+            children: [
+              ListTile(
+                leading: const ProviderAvatar(kind: ProviderKind.network, size: 32),
+                title: const Text('Connect to a home server'),
+                subtitle: Text(
+                  state.hasKey(ProviderKind.network)
+                      ? 'Connected to ${state.connectedHostName ?? 'a host'}'
+                      : 'Use AI models from another device on your Wi-Fi',
+                  style: TextStyle(color: p.textMuted),
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => const ConnectScreen(),
+                )),
+              ),
+              if (HostController.supported)
+                ListTile(
+                  leading: const Icon(Icons.router_outlined),
+                  title: const Text('Share this device'),
+                  subtitle: Text(
+                    state.host.server.running
+                        ? 'Sharing on this Wi-Fi'
+                        : 'Let your other devices use this device\'s AI',
+                    style: TextStyle(color: p.textMuted),
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => const HostScreen(),
+                  )),
+                ),
+            ],
+          ),
           const _SectionTitle('API keys'),
           _Card(
             children: [
               for (final k in ProviderKind.values)
-                if (k != ProviderKind.local)
+                if (k != ProviderKind.local && k != ProviderKind.network)
                   ListTile(
                     leading: ProviderAvatar(kind: k, size: 32),
                     title: Text(k.label),

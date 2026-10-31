@@ -89,6 +89,37 @@ Open **Settings → On-device models** (or the model picker → On-device → Do
 - Android needs a 64-bit phone with Android 10 or later. The model list lives in
   `lib/data/local/local_models.dart`.
 
+## Home server (share models on your Wi-Fi)
+
+Turn an old phone or a PC into a private AI server for your other devices.
+
+**On the host** (e.g. the old phone): **Settings → Share this device**, then turn on
+**Share AI on this Wi-Fi**. Choose what to share: on-device models, and optionally cloud
+models that then use the host's API keys. On Android a notification shows while sharing; keep
+the app open in the background.
+
+**On your other devices:** **Settings → Connect to a home server**. The host appears
+automatically; tap it and enter the 6-digit PIN shown on the host. You can also type the
+address (e.g. `192.168.1.23:8484`). The shared models then appear in the model picker under
+**Home server**.
+
+**Other apps** (Open WebUI, Continue, the OpenAI SDKs, curl) can use the host's
+OpenAI-compatible API. On the host, tap **Create access key**, then use:
+
+```bash
+curl http://192.168.1.23:8484/v1/chat/completions \
+  -H "Authorization: Bearer cbh_..." -H "Content-Type: application/json" \
+  -d '{"model": "local/LFM2-1.2B-Q4_K_M", "messages": [{"role": "user", "content": "Hi"}]}'
+```
+
+`GET /v1/models` lists what the host shares. Model ids look like `local/<model>` or
+`anthropic/claude-sonnet-5-5`. Streaming (`"stream": true`) and
+`stream_options.include_usage` work as with OpenAI.
+
+Security: only paired devices and apps with an access key can use the server; remove a
+device on the host to revoke it. Wrong PINs are rate-limited and the PIN rotates. Traffic on
+the Wi-Fi isn't encrypted, so share only on networks you trust.
+
 ## Building releases
 
 ```bash

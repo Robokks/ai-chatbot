@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home servers on the local Wi-Fi ("Connect to a home server") and local
+     OpenAI-compatible servers (Ollama, LM Studio) are reached over plain
+     http at a LAN IP address, which Android can't allowlist by range.
+     Cloud providers always use https; every request to a home server
+     carries an access key. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -139,6 +139,12 @@ class Storage {
 
   // API keys
 
+  /// Other secrets (host access keys, MCP/UTCP tokens).
+  Future<String?> readSecret(String name) => _keys.read('secret.$name');
+  Future<void> writeSecret(String name, String? value) => value == null || value.isEmpty
+      ? _keys.delete('secret.$name')
+      : _keys.write('secret.$name', value);
+
   Future<String?> readKey(ProviderKind kind) => _keys.read('key.${kind.name}');
   Future<void> writeKey(ProviderKind kind, String? value) =>
       value == null || value.isEmpty

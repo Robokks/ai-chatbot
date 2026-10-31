@@ -54,6 +54,9 @@ dependencies:
   crypto: ^3.0.8
   background_downloader: ^9.6.5
   device_info_plus: ^13.3.0
+  bonsoir: ^7.1.6
+  flutter_foreground_task: ^11.0.3
+  intl: ^0.20.3
 dev_dependencies:
   flutter_test:
     sdk: flutter

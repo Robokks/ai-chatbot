@@ -277,6 +277,16 @@ enum ProviderKind {
     images: false,
     pdf: false,
   ),
+  network(
+    label: 'Home server',
+    vendor: 'Another device',
+    style: ApiStyle.openai,
+    baseUrl: '',
+    models: [],
+    keyUrl: '',
+    images: true,
+    pdf: false,
+  ),
   custom(
     label: 'Custom',
     vendor: 'OpenAI-compatible',

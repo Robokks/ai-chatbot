@@ -16,6 +16,20 @@ class LocalEngineHost {
   LlamaEngine? _engine;
   String? _path;
   Future<LlamaEngine>? _loading;
+  Future<void> _turn = Future.value();
+
+  /// Waits until no other reply is using the engine (the host's own chat and
+  /// requests from other devices share it). Call the returned function when
+  /// done.
+  Future<void Function()> acquire() async {
+    final previous = _turn;
+    final done = Completer<void>();
+    _turn = done.future;
+    await previous;
+    return () {
+      if (!done.isCompleted) done.complete();
+    };
+  }
 
   bool isLoaded(String path) => _engine != null && _path == path;
 
@@ -106,9 +120,12 @@ class LocalProvider extends LlmProvider {
   @override
   Stream<ChatDelta> streamChat(ChatRequest request) {
     StreamSubscription<LlamaCompletionChunk>? sub;
+    void Function()? release;
     late final StreamController<ChatDelta> out;
     out = StreamController<ChatDelta>(
       onListen: () async {
+        release = await host.acquire();
+        if (out.isClosed) return release!();
         try {
           final path = await pathFor(request.model);
           if (!host.isLoaded(path)) {
@@ -143,11 +160,16 @@ class LocalProvider extends LlmProvider {
             },
             onError: (Object e) {
               out.addError(LlmException('The on-device model stopped: $e'));
+              release?.call();
               out.close();
             },
-            onDone: out.close,
+            onDone: () {
+              release?.call();
+              out.close();
+            },
           );
         } catch (e) {
+          release?.call();
           out.addError(LlmException('Could not load the model: $e'));
           await out.close();
         }
@@ -155,6 +177,7 @@ class LocalProvider extends LlmProvider {
       onCancel: () async {
         host.cancel();
         await sub?.cancel();
+        release?.call();
       },
     );
     return out.stream;
