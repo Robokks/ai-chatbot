@@ -11,6 +11,15 @@ import 'model_downloader.dart';
 
 export 'model_downloader.dart' show DownloadCancelled, DownloadInterrupted;
 
+/// What a local model does.
+enum LocalModelKind {
+  /// Chat (llama.cpp).
+  chat,
+
+  /// Makes pictures from text (stable-diffusion.cpp).
+  image,
+}
+
 /// A GGUF model that can run on the device.
 class LocalModelInfo {
   const LocalModelInfo({
@@ -21,7 +30,16 @@ class LocalModelInfo {
     required this.ramGb,
     this.note = '',
     this.sha256,
+    this.kind = LocalModelKind.chat,
+    this.license,
   });
+
+  final LocalModelKind kind;
+
+  /// Name and link of the model's license, shown on its card.
+  final ({String name, String url})? license;
+
+  bool get isImage => kind == LocalModelKind.image;
 
   /// File stem, also used as the model id in the picker.
   final String id;
@@ -42,6 +60,7 @@ class LocalModelInfo {
         'ramGb': ramGb,
         'note': note,
         if (sha256 != null) 'sha256': sha256,
+        if (kind != LocalModelKind.chat) 'kind': kind.name,
       };
 
   factory LocalModelInfo.fromJson(Map<String, dynamic> j) => LocalModelInfo(
@@ -52,6 +71,7 @@ class LocalModelInfo {
         ramGb: (j['ramGb'] as num).toDouble(),
         note: j['note'] as String? ?? '',
         sha256: j['sha256'] as String?,
+        kind: LocalModelKind.values.asNameMap()[j['kind']] ?? LocalModelKind.chat,
       );
 
   /// Builds an entry from a pasted link: `hf://owner/repo/file.gguf` or an
@@ -86,6 +106,10 @@ String safeModelId(String fileName) {
 final _validId = RegExp(r'^[A-Za-z0-9_-][A-Za-z0-9._-]*$');
 
 String _hf(String repo, String file) => 'https://huggingface.co/$repo/resolve/main/$file';
+
+/// A file at a fixed revision, so the download never changes under us.
+String _hfAt(String repo, String revision, String file) =>
+    'https://huggingface.co/$repo/resolve/$revision/$file';
 
 /// Built-in suggestions. Liquid AI's LFM models are built for phones.
 final builtInLocalModels = <LocalModelInfo>[
@@ -143,6 +167,27 @@ final builtInLocalModels = <LocalModelInfo>[
     note: 'Good at code and many languages.',
     sha256: '6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e',
   ),
+  ...builtInImageModels,
+];
+
+/// Image models. SDXS makes a 512×512 picture in one step and is the
+/// smallest model llamadart validates on phones.
+final builtInImageModels = <LocalModelInfo>[
+  LocalModelInfo(
+    id: 'sdxs-512-tinySDdistilled_Q8_0',
+    name: 'SDXS 512',
+    url: _hfAt('concedo/sdxs-512-tinySDdistilled-GGUF', '3144d898d61492f8382ffcabec055733fc5b2a0e',
+        'sdxs-512-tinySDdistilled_Q8_0.gguf'),
+    sizeMb: 683,
+    ramGb: 2,
+    note: 'Makes a 512×512 picture from your words in a few seconds on a PC, '
+        'or under a minute on most phones.',
+    kind: LocalModelKind.image,
+    license: (
+      name: 'CreativeML Open RAIL++-M',
+      url: 'https://huggingface.co/concedo/sdxs-512-tinySDdistilled-GGUF',
+    ),
+  ),
 ];
 
 class ChecksumMismatch implements Exception {
@@ -179,6 +224,17 @@ class LocalModelStore extends ChangeNotifier {
   final Set<String> interrupted = {};
 
   List<LocalModelInfo> get all => [...builtInLocalModels, ...custom];
+
+  List<LocalModelInfo> get chatModels => [for (final m in all) if (!m.isImage) m];
+  List<LocalModelInfo> get imageModels => [for (final m in all) if (m.isImage) m];
+
+  /// The downloaded image model to use, or null.
+  LocalModelInfo? get installedImageModel {
+    for (final m in imageModels) {
+      if (installed.contains(m.id)) return m;
+    }
+    return null;
+  }
 
   LocalModelInfo? byId(String id) {
     for (final m in all) {

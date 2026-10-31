@@ -102,7 +102,7 @@ class AppState extends ChangeNotifier {
   /// Mirrors installed GGUF files into the On-device provider's model list.
   void _syncLocalModels() {
     final ids = [
-      for (final m in localModels.all)
+      for (final m in localModels.chatModels)
         if (localModels.installed.contains(m.id)) m.id,
     ];
     providers[ProviderKind.local] = ProviderSettings(kind: ProviderKind.local, models: ids);
@@ -120,7 +120,7 @@ class AppState extends ChangeNotifier {
 
   bool hasKey(ProviderKind k) {
     if (k == ProviderKind.local) {
-      return localSupported && localModels.installed.isNotEmpty;
+      return localSupported && (providers[ProviderKind.local]?.models.isNotEmpty ?? false);
     }
     return demoMode || k == ProviderKind.custom || (_keys[k]?.isNotEmpty ?? false);
   }
