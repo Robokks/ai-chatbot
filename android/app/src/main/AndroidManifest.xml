@@ -4,6 +4,10 @@
     <!-- Taking a photo to attach to a message. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Model downloads run as a background job with a progress notification,
+         so they continue when the user switches apps (Android 13+/14+). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RUN_USER_INITIATED_JOBS" />
     <application
         android:label="Chatbot"
         android:allowBackup="false"

@@ -91,6 +91,52 @@ void main() {
       expect(File('${dir.path}/bad.gguf.part').existsSync(), isFalse);
     });
 
+    test('an interrupted download resumes from where it stopped', () async {
+      final full = List<int>.generate(1500, (i) => i % 251);
+      var attempt = 0;
+      final client = MockClient.streaming((req, _) async {
+        attempt++;
+        if (attempt == 1) {
+          expect(req.headers['range'], isNull);
+          // Connection drops after 1000 of 1500 bytes.
+          final ctrl = StreamController<List<int>>();
+          ctrl.add(full.sublist(0, 1000));
+          ctrl.addError(const SocketException('connection reset'));
+          unawaited(ctrl.close());
+          return http.StreamedResponse(ctrl.stream, 200, contentLength: 1500);
+        }
+        expect(req.headers['range'], 'bytes=1000-');
+        return http.StreamedResponse(Stream.value(full.sublist(1000)), 206, contentLength: 500);
+      });
+      final store = LocalModelStore(null, dir: dir, client: client);
+
+      await expectLater(store.download(_model), throwsA(isA<DownloadInterrupted>()));
+      expect(store.interrupted, {'tiny'});
+      expect(File('${dir.path}/tiny.gguf.part').lengthSync(), 1000);
+
+      // After an app restart the partial download is still offered.
+      final restarted = LocalModelStore(null, dir: dir, client: client);
+      await restarted.load();
+      expect(restarted.interrupted, {'tiny'});
+      expect(restarted.installed, isEmpty);
+
+      await restarted.download(_model);
+      expect(File('${dir.path}/tiny.gguf').readAsBytesSync(), full);
+      expect(restarted.installed, {'tiny'});
+      expect(restarted.interrupted, isEmpty);
+      expect(attempt, 2);
+    });
+
+    test('discarding a stopped download removes the partial file', () async {
+      File('${dir.path}/tiny.gguf.part').writeAsBytesSync([1, 2, 3]);
+      final store = LocalModelStore(null, dir: dir);
+      await store.load();
+      expect(store.interrupted, {'tiny'});
+      await store.discardPartial('tiny');
+      expect(store.interrupted, isEmpty);
+      expect(dir.listSync(), isEmpty);
+    });
+
     test('parses hf:// and https links', () {
       final hf = LocalModelInfo.fromLink('hf://LiquidAI/LFM2-1.2B-GGUF/LFM2-1.2B-Q4_K_M.gguf');
       expect(hf.url,

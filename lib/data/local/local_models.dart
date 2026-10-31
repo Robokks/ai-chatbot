@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/storage.dart';
+import 'model_downloader.dart';
+
+export 'model_downloader.dart' show DownloadCancelled, DownloadInterrupted;
 
 /// A GGUF model that can run on the device.
 class LocalModelInfo {
@@ -143,8 +145,6 @@ final builtInLocalModels = <LocalModelInfo>[
   ),
 ];
 
-class DownloadCancelled implements Exception {}
-
 class ChecksumMismatch implements Exception {
   @override
   String toString() => 'The downloaded file is damaged or not the expected model '
@@ -153,12 +153,16 @@ class ChecksumMismatch implements Exception {
 
 /// Downloads, imports, lists and deletes GGUF files in the app's data folder.
 class LocalModelStore extends ChangeNotifier {
-  LocalModelStore(this._storage, {Directory? dir, http.Client? client})
-      : _fixedDir = dir,
-        _client = client ?? http.Client();
+  LocalModelStore(
+    this._storage, {
+    Directory? dir,
+    http.Client? client,
+    ModelDownloader? downloader,
+  })  : _fixedDir = dir,
+        _downloader = downloader ?? defaultModelDownloader(client);
 
   final Storage? _storage;
-  final http.Client _client;
+  final ModelDownloader _downloader;
   final Directory? _fixedDir;
   Directory? _dir;
 
@@ -167,7 +171,12 @@ class LocalModelStore extends ChangeNotifier {
 
   /// Download progress 0..1 by model id (missing = not downloading).
   final Map<String, double> progress = {};
-  final Set<String> _cancelled = {};
+
+  /// Short status for an active download, e.g. "Waiting for internet…".
+  final Map<String, String> status = {};
+
+  /// Downloads that stopped part-way and can be resumed.
+  final Set<String> interrupted = {};
 
   List<LocalModelInfo> get all => [...builtInLocalModels, ...custom];
 
@@ -200,14 +209,39 @@ class LocalModelStore extends ChangeNotifier {
             .map((e) => LocalModelInfo.fromJson(Map<String, dynamic>.from(e))));
     }
     installed.clear();
+    interrupted.clear();
     await for (final f in (await _modelsDir()).list()) {
+      if (f is! File) continue;
       final name = f.uri.pathSegments.last;
-      final id = name.endsWith('.gguf') ? name.substring(0, name.length - 5) : '';
-      if (f is File && _validId.hasMatch(id)) {
-        installed.add(id);
-      }
+      final partial = name.endsWith('.gguf.part');
+      final stem = partial
+          ? name.substring(0, name.length - 10)
+          : name.endsWith('.gguf')
+              ? name.substring(0, name.length - 5)
+              : '';
+      if (!_validId.hasMatch(stem)) continue;
+      (partial ? interrupted : installed).add(stem);
     }
+    interrupted.removeAll(installed);
     notifyListeners();
+
+    // Pick up downloads that kept running (or stopped) while the app was closed.
+    try {
+      await _downloader.init();
+      final previous = await _downloader.previous();
+      for (final e in previous.entries) {
+        final m = byId(e.key);
+        if (m == null || installed.contains(m.id)) continue;
+        if (e.value) {
+          unawaited(download(m).catchError((_) {}));
+        } else {
+          interrupted.add(m.id);
+        }
+      }
+      notifyListeners();
+    } catch (_) {
+      // Background downloads unavailable (e.g. tests): plain downloads still work.
+    }
   }
 
   Future<void> _saveCustom() async => _storage?.setSetting(
@@ -220,63 +254,71 @@ class LocalModelStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Downloads [m] to `<id>.gguf` via a `.part` file. Throws on failure.
+  /// Downloads [m] (resuming a partial download when possible), checks its
+  /// SHA-256 when pinned, and installs it as `<id>.gguf`.
   Future<void> download(LocalModelInfo m) async {
     if (progress.containsKey(m.id)) return;
-    _cancelled.remove(m.id);
     progress[m.id] = 0;
+    interrupted.remove(m.id);
     notifyListeners();
     final path = await pathFor(m.id);
-    final part = File('$path.part');
-    IOSink? sink;
+    final partPath = '$path.part';
     try {
-      final res = await _client.send(http.Request('GET', Uri.parse(m.url)));
-      if (res.statusCode != 200) {
-        throw HttpException(res.statusCode == 401 || res.statusCode == 403
-            ? 'This model needs a Hugging Face login (status ${res.statusCode}).'
-            : 'Download failed (status ${res.statusCode}).');
-      }
-      final total = res.contentLength ?? m.sizeMb * 1024 * 1024;
-      var received = 0;
-      var lastNotify = DateTime.now();
-      final digest = _DigestSink();
-      final hasher = sha256.startChunkedConversion(digest);
-      sink = part.openWrite();
-      await for (final chunk in res.stream) {
-        if (_cancelled.contains(m.id)) throw DownloadCancelled();
-        sink.add(chunk);
-        hasher.add(chunk);
-        received += chunk.length;
-        if (DateTime.now().difference(lastNotify).inMilliseconds > 200) {
-          progress[m.id] = total > 0 ? (received / total).clamp(0, 1) : 0;
-          lastNotify = DateTime.now();
+      final file = await _downloader.download(
+        id: m.id,
+        url: m.url,
+        partPath: partPath,
+        displayName: m.name,
+        onProgress: (p) {
+          progress[m.id] = p;
           notifyListeners();
-        }
-      }
-      await sink.close();
-      sink = null;
-      hasher.close();
+        },
+        onStatus: (s) {
+          s == null ? status.remove(m.id) : status[m.id] = s;
+          notifyListeners();
+        },
+      );
+      status[m.id] = 'Checking file…';
+      progress[m.id] = 1;
+      notifyListeners();
       final expected = m.sha256;
-      if (expected != null && digest.value.toString() != expected.toLowerCase()) {
+      if (expected != null && await compute(sha256OfFile, file) != expected.toLowerCase()) {
+        await File(file).delete();
         throw ChecksumMismatch();
       }
-      await part.rename(path);
+      await _move(file, path);
       installed.add(m.id);
-    } catch (_) {
-      await sink?.close();
-      if (await part.exists()) await part.delete();
+    } on DownloadCancelled {
+      await _downloader.discard(m.id, partPath);
+      rethrow;
+    } on DownloadInterrupted {
+      interrupted.add(m.id);
       rethrow;
     } finally {
       progress.remove(m.id);
-      _cancelled.remove(m.id);
+      status.remove(m.id);
       notifyListeners();
     }
   }
 
-  void cancel(String id) {
-    if (progress.containsKey(id)) _cancelled.add(id);
+  static Future<void> _move(String from, String to) async {
+    if (from == to) return;
+    try {
+      await File(from).rename(to);
+    } on FileSystemException {
+      await File(from).copy(to);
+      await File(from).delete();
+    }
   }
 
+  Future<void> cancel(String id) => _downloader.cancel(id);
+
+  /// Throws away a stopped download's partial data.
+  Future<void> discardPartial(String id) async {
+    await _downloader.discard(id, '${await pathFor(id)}.part');
+    interrupted.remove(id);
+    notifyListeners();
+  }
   /// Copies a `.gguf` file the user picked into the models folder.
   Future<LocalModelInfo> importFile(String sourcePath, String fileName) async {
     final id = safeModelId(fileName);
@@ -311,12 +353,3 @@ class LocalModelStore extends ChangeNotifier {
   }
 }
 
-class _DigestSink implements Sink<Digest> {
-  late Digest value;
-
-  @override
-  void add(Digest data) => value = data;
-
-  @override
-  void close() {}
-}

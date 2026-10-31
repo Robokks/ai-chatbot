@@ -52,6 +52,7 @@ dependencies:
   llamadart: ^0.17.0
   path_provider: ^2.1.6
   crypto: ^3.0.8
+  background_downloader: ^9.6.5
 dev_dependencies:
   flutter_test:
     sdk: flutter

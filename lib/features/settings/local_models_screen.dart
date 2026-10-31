@@ -67,6 +67,8 @@ class LocalModelsScreen extends StatelessWidget {
                         info: m,
                         installed: store.installed.contains(m.id),
                         progress: store.progress[m.id],
+                        status: store.status[m.id],
+                        interrupted: store.interrupted.contains(m.id),
                         selected: state.provider == ProviderKind.local && state.model == m.id,
                         custom: store.custom.contains(m),
                       ),
@@ -164,11 +166,16 @@ void _startDownload(
   });
 }
 
+String _megabytes(int mb) =>
+    mb >= 1000 ? '${(mb / 1024).toStringAsFixed(1)} GB' : '$mb MB';
+
 class _ModelCard extends StatelessWidget {
   const _ModelCard({
     required this.info,
     required this.installed,
     required this.progress,
+    required this.status,
+    required this.interrupted,
     required this.selected,
     required this.custom,
   });
@@ -176,6 +183,8 @@ class _ModelCard extends StatelessWidget {
   final LocalModelInfo info;
   final bool installed;
   final double? progress;
+  final String? status;
+  final bool interrupted;
   final bool selected;
   final bool custom;
 
@@ -187,10 +196,7 @@ class _ModelCard extends StatelessWidget {
     final accent = Theme.of(context).colorScheme.primary;
     final downloading = progress != null;
     final details = [
-      if (info.sizeMb > 0)
-        info.sizeMb >= 1000
-            ? '${(info.sizeMb / 1024).toStringAsFixed(1)} GB'
-            : '${info.sizeMb} MB',
+      if (info.sizeMb > 0) _megabytes(info.sizeMb),
       if (info.ramGb > 0) 'needs ~${info.ramGb.toStringAsFixed(info.ramGb % 1 == 0 ? 0 : 1)} GB RAM',
     ].join(' · ');
 
@@ -259,6 +265,19 @@ class _ModelCard extends StatelessWidget {
                     PopupMenuItem(value: 'delete', child: Text('Delete from device')),
                   ],
                 ),
+              ] else if (interrupted) ...[
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
+                  onPressed: () => _startDownload(ScaffoldMessenger.of(context), store, info),
+                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                  label: const Text('Resume'),
+                ),
+                IconButton(
+                  tooltip: 'Discard partial download',
+                  onPressed: () => store.discardPartial(info.id),
+                  icon: const Icon(Icons.close_rounded, size: 20),
+                ),
               ] else ...[
                 if (info.url.isNotEmpty)
                   OutlinedButton.icon(
@@ -294,6 +313,22 @@ class _ModelCard extends StatelessWidget {
                   Text('${((progress ?? 0) * 100).round()}%',
                       style: TextStyle(color: p.textMuted, fontSize: 12.5)),
                 ],
+              ),
+            ),
+          if (downloading)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                status ?? 'Keeps downloading if you switch apps',
+                style: TextStyle(color: p.textMuted, fontSize: 12.5),
+              ),
+            ),
+          if (interrupted && !downloading)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'Download stopped. Resume continues from where it left off.',
+                style: TextStyle(color: p.textMuted, fontSize: 12.5),
               ),
             ),
         ],
