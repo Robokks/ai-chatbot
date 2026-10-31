@@ -49,6 +49,8 @@ dependencies:
   mime: ^2.1.0
   material_ui: ^1.9.0
   url_launcher: ^6.3.3
+  llamadart: ^0.17.0
+  path_provider: ^2.1.6
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -92,3 +94,10 @@ flutter_launcher_icons:
     image_path: assets/icon/icon.png
     background_color: "#FAF9F5"
     theme_color: "#C96442"
+
+# On-device models use GGUF through llama.cpp only; skip the LiteRT-LM runtime
+# to keep the app smaller.
+hooks:
+  user_defines:
+    llamadart:
+      llamadart_native_runtimes: [llama_cpp]

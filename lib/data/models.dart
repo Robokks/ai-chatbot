@@ -137,7 +137,7 @@ class Conversation {
 }
 
 /// API style a provider speaks.
-enum ApiStyle { anthropic, openai, gemini }
+enum ApiStyle { anthropic, openai, gemini, local }
 
 /// Supported providers. Most non-Anthropic/Google vendors expose an
 /// OpenAI-compatible Chat Completions endpoint.
@@ -199,6 +199,16 @@ enum ProviderKind {
     baseUrl: 'https://api.groq.com/openai/v1',
     models: ['llama-3.3-70b-versatile'],
     keyUrl: 'https://console.groq.com/keys',
+    images: false,
+    pdf: false,
+  ),
+  local(
+    label: 'On-device',
+    vendor: 'Offline',
+    style: ApiStyle.local,
+    baseUrl: '',
+    models: [],
+    keyUrl: '',
     images: false,
     pdf: false,
   ),

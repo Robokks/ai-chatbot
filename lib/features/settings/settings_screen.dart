@@ -5,6 +5,7 @@ import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
 import '../chat/model_picker.dart';
+import 'local_models_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -17,30 +18,59 @@ class SettingsScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Settings')),
       body: _Centered(
         children: [
+          if (AppState.localSupported) ...[
+            const _SectionTitle('Offline'),
+            _Card(
+              children: [
+                ListTile(
+                  leading: const ProviderAvatar(
+                    kind: ProviderKind.local,
+                    size: 32,
+                  ),
+                  title: const Text('On-device models'),
+                  subtitle: Text(
+                    state.localModels.installed.isEmpty
+                        ? 'Run AI offline, no API key needed'
+                        : '${state.localModels.installed.length} downloaded',
+                    style: TextStyle(color: p.textMuted),
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const LocalModelsScreen(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const _SectionTitle('API keys'),
           _Card(
             children: [
               for (final k in ProviderKind.values)
-                ListTile(
-                  leading: ProviderAvatar(kind: k, size: 32),
-                  title: Text(k.label),
-                  subtitle: Text(
-                    k == ProviderKind.custom
-                        ? 'OpenAI-compatible server'
-                        : state.hasKey(k)
-                            ? 'Connected'
-                            : 'Not set',
-                    style: TextStyle(
-                      color: state.hasKey(k) && k != ProviderKind.custom
-                          ? const Color(0xFF2E9E5B)
-                          : p.textMuted,
+                if (k != ProviderKind.local)
+                  ListTile(
+                    leading: ProviderAvatar(kind: k, size: 32),
+                    title: Text(k.label),
+                    subtitle: Text(
+                      k == ProviderKind.custom
+                          ? 'OpenAI-compatible server'
+                          : state.hasKey(k)
+                          ? 'Connected'
+                          : 'Not set',
+                      style: TextStyle(
+                        color: state.hasKey(k) && k != ProviderKind.custom
+                            ? const Color(0xFF2E9E5B)
+                            : p.textMuted,
+                      ),
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ProviderScreen(kind: k),
+                      ),
                     ),
                   ),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => ProviderScreen(kind: k),
-                  )),
-                ),
             ],
           ),
           Padding(
@@ -60,17 +90,20 @@ class SettingsScreen extends StatelessWidget {
                   child: SegmentedButton<ThemeMode>(
                     segments: const [
                       ButtonSegment(
-                          value: ThemeMode.system,
-                          icon: Icon(Icons.brightness_auto_outlined),
-                          label: Text('System')),
+                        value: ThemeMode.system,
+                        icon: Icon(Icons.brightness_auto_outlined),
+                        label: Text('System'),
+                      ),
                       ButtonSegment(
-                          value: ThemeMode.light,
-                          icon: Icon(Icons.light_mode_outlined),
-                          label: Text('Light')),
+                        value: ThemeMode.light,
+                        icon: Icon(Icons.light_mode_outlined),
+                        label: Text('Light'),
+                      ),
                       ButtonSegment(
-                          value: ThemeMode.dark,
-                          icon: Icon(Icons.dark_mode_outlined),
-                          label: Text('Dark')),
+                        value: ThemeMode.dark,
+                        icon: Icon(Icons.dark_mode_outlined),
+                        label: Text('Dark'),
+                      ),
                     ],
                     selected: {state.themeMode},
                     showSelectedIcon: false,
@@ -142,7 +175,9 @@ class ProviderScreen extends StatefulWidget {
 class _ProviderScreenState extends State<ProviderScreen> {
   late final AppState _state = AppScope.read(context);
   late final _key = TextEditingController(text: _state.keyFor(widget.kind));
-  late final _url = TextEditingController(text: _state.providers[widget.kind]!.baseUrl);
+  late final _url = TextEditingController(
+    text: _state.providers[widget.kind]!.baseUrl,
+  );
   final _newModel = TextEditingController();
   late List<String> _models = List.of(_state.providers[widget.kind]!.models);
   bool _obscure = true;
@@ -165,7 +200,9 @@ class _ProviderScreenState extends State<ProviderScreen> {
     await _state.updateProviderSettings(
       ProviderSettings(kind: k, baseUrl: _url.text.trim(), models: _models),
     );
-    if (!_models.contains(_state.model) && _state.provider == k && _models.isNotEmpty) {
+    if (!_models.contains(_state.model) &&
+        _state.provider == k &&
+        _models.isNotEmpty) {
       await _state.selectModel(k, _models.first);
     }
   }
@@ -208,7 +245,12 @@ class _ProviderScreenState extends State<ProviderScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 0, 12, 8),
                 child: Row(
                   children: [
-                    Expanded(child: Text('Models to show', style: serif(ctx, size: 20))),
+                    Expanded(
+                      child: Text(
+                        'Models to show',
+                        style: serif(ctx, size: 20),
+                      ),
+                    ),
                     FilledButton(
                       onPressed: () => Navigator.pop(ctx, chosen),
                       child: const Text('Done'),
@@ -224,7 +266,9 @@ class _ProviderScreenState extends State<ProviderScreen> {
                       CheckboxListTile(
                         value: chosen.contains(m),
                         title: Text(m),
-                        onChanged: (v) => setSheet(() => v! ? chosen.add(m) : chosen.remove(m)),
+                        onChanged: (v) => setSheet(
+                          () => v! ? chosen.add(m) : chosen.remove(m),
+                        ),
                       ),
                   ],
                 ),
@@ -235,10 +279,12 @@ class _ProviderScreenState extends State<ProviderScreen> {
       ),
     );
     if (result != null && result.isNotEmpty) {
-      setState(() => _models = [
-            ..._models.where(result.contains),
-            ...result.where((m) => !_models.contains(m)),
-          ]);
+      setState(
+        () => _models = [
+          ..._models.where(result.contains),
+          ...result.where((m) => !_models.contains(m)),
+        ],
+      );
       await _save();
     }
   }
@@ -274,12 +320,18 @@ class _ProviderScreenState extends State<ProviderScreen> {
               autocorrect: false,
               enableSuggestions: false,
               decoration: InputDecoration(
-                labelText: k == ProviderKind.custom ? 'API key (optional)' : 'API key',
+                labelText: k == ProviderKind.custom
+                    ? 'API key (optional)'
+                    : 'API key',
                 prefixIcon: const Icon(Icons.key_rounded),
                 suffixIcon: IconButton(
                   tooltip: _obscure ? 'Show' : 'Hide',
                   onPressed: () => setState(() => _obscure = !_obscure),
-                  icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                  icon: Icon(
+                    _obscure
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
                 ),
               ),
             ),
@@ -287,8 +339,10 @@ class _ProviderScreenState extends State<ProviderScreen> {
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
-                  onPressed: () => launchUrl(Uri.parse(k.keyUrl),
-                      mode: LaunchMode.externalApplication),
+                  onPressed: () => launchUrl(
+                    Uri.parse(k.keyUrl),
+                    mode: LaunchMode.externalApplication,
+                  ),
                   icon: const Icon(Icons.open_in_new_rounded, size: 16),
                   label: Text('Get a ${k.label} key'),
                 ),
@@ -303,7 +357,9 @@ class _ProviderScreenState extends State<ProviderScreen> {
                         : () async {
                             final messenger = ScaffoldMessenger.of(context);
                             await _save();
-                            messenger.showSnackBar(const SnackBar(content: Text('Saved')));
+                            messenger.showSnackBar(
+                              const SnackBar(content: Text('Saved')),
+                            );
                           },
                     child: const Text('Save'),
                   ),
@@ -312,11 +368,14 @@ class _ProviderScreenState extends State<ProviderScreen> {
                 Expanded(
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
                     onPressed: _busy ? null : _test,
                     icon: _busy
                         ? const SizedBox.square(
-                            dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
                         : const Icon(Icons.wifi_tethering_rounded, size: 18),
                     label: const Text('Test & load models'),
                   ),
@@ -330,12 +389,21 @@ class _ProviderScreenState extends State<ProviderScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Icon(
-                      _ok ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+                      _ok
+                          ? Icons.check_circle_rounded
+                          : Icons.error_outline_rounded,
                       size: 18,
-                      color: _ok ? const Color(0xFF2E9E5B) : Theme.of(context).colorScheme.error,
+                      color: _ok
+                          ? const Color(0xFF2E9E5B)
+                          : Theme.of(context).colorScheme.error,
                     ),
                     const SizedBox(width: 8),
-                    Expanded(child: Text(_status!, style: const TextStyle(fontSize: 13.5))),
+                    Expanded(
+                      child: Text(
+                        _status!,
+                        style: const TextStyle(fontSize: 13.5),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -354,7 +422,10 @@ class _ProviderScreenState extends State<ProviderScreen> {
                         key: ValueKey(m),
                         leading: ReorderableDragStartListener(
                           index: i,
-                          child: Icon(Icons.drag_indicator_rounded, color: p.textMuted),
+                          child: Icon(
+                            Icons.drag_indicator_rounded,
+                            color: p.textMuted,
+                          ),
                         ),
                         title: Text(prettyModel(m)),
                         subtitle: prettyModel(m) == m ? null : Text(m),
@@ -420,7 +491,9 @@ class _ProviderScreenState extends State<ProviderScreen> {
 
   String _capabilities() {
     final img = k.images ? 'Images: supported' : 'Images: not supported';
-    final pdf = k.pdf ? 'PDFs: sent natively' : 'PDFs: text is extracted and sent';
+    final pdf = k.pdf
+        ? 'PDFs: sent natively'
+        : 'PDFs: text is extracted and sent';
     return '$img · $pdf · Text and code files: supported';
   }
 }

@@ -10,12 +10,15 @@ import 'openai_provider.dart';
 
 /// A piece of streamed output.
 class ChatDelta {
-  const ChatDelta({this.text = '', this.reasoning = '', this.notice});
+  const ChatDelta({this.text = '', this.reasoning = '', this.notice, this.status});
   final String text;
   final String reasoning;
 
   /// A non-fatal message to show under the reply (e.g. a refusal).
   final String? notice;
+
+  /// Transient progress shown while waiting for output (e.g. loading a model).
+  final String? status;
 }
 
 class ChatRequest {
@@ -103,6 +106,8 @@ abstract class LlmProvider {
         OpenAiProvider(settings: settings, apiKey: apiKey, client: client),
       ApiStyle.gemini =>
         GeminiProvider(settings: settings, apiKey: apiKey, client: client),
+      ApiStyle.local => throw UnsupportedError(
+          'On-device models are created with LocalProvider, not LlmProvider.create'),
     };
   }
 }

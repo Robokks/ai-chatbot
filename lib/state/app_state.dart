@@ -1,10 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../core/storage.dart';
 import '../data/llm/demo_provider.dart';
 import '../data/llm/llm_provider.dart';
+import '../data/llm/local_provider.dart';
+import '../data/local/local_models.dart';
 import '../data/models.dart';
 
 const demoMode = bool.fromEnvironment('DEMO');
@@ -12,12 +15,31 @@ const demoMode = bool.fromEnvironment('DEMO');
 /// App-wide state: settings, provider keys, conversations and the active
 /// streaming reply.
 class AppState extends ChangeNotifier {
-  AppState(this.storage, {LlmProvider Function(ProviderSettings, String)? providerFactory})
-      : _providerFactory = providerFactory ??
-            ((s, k) => demoMode ? DemoProvider(s) : LlmProvider.create(s, k));
+  AppState(
+    this.storage, {
+    LlmProvider Function(ProviderSettings, String)? providerFactory,
+    LocalModelStore? localModels,
+  }) : localModels = localModels ?? LocalModelStore(storage) {
+    _providerFactory = providerFactory ?? _defaultProvider;
+    this.localModels.addListener(_syncLocalModels);
+  }
 
   final Storage storage;
-  final LlmProvider Function(ProviderSettings, String) _providerFactory;
+
+  /// GGUF models downloaded to this device.
+  final LocalModelStore localModels;
+  late final LlmProvider Function(ProviderSettings, String) _providerFactory;
+
+  /// On-device models run natively; the web build has no llama.cpp.
+  static bool get localSupported => !kIsWeb;
+
+  LlmProvider _defaultProvider(ProviderSettings s, String key) {
+    if (demoMode) return DemoProvider(s);
+    if (s.kind == ProviderKind.local) {
+      return LocalProvider(settings: s, pathFor: localModels.pathFor);
+    }
+    return LlmProvider.create(s, key);
+  }
 
   final Map<ProviderKind, ProviderSettings> providers = {};
   final Map<ProviderKind, String> _keys = {};
@@ -34,6 +56,9 @@ class AppState extends ChangeNotifier {
   Message? streamingMessage;
   bool get isStreaming => streamingMessage != null;
 
+  /// Shown beside the typing indicator, e.g. "Loading model…".
+  String? streamingStatus;
+
   Future<void> load() async {
     for (final k in ProviderKind.values) {
       providers[k] = storage.providerSettings(k);
@@ -45,20 +70,50 @@ class AppState extends ChangeNotifier {
     systemPrompt = storage.getSetting('systemPrompt') ?? '';
     provider = ProviderKind.values.asNameMap()[storage.getSetting('provider')] ??
         ProviderKind.anthropic;
-    model = storage.getSetting('model') ?? providers[provider]!.models.first;
+    model = storage.getSetting('model') ?? providers[provider]!.models.firstOrNull ?? '';
     conversations = storage.loadConversations();
+    if (localSupported) {
+      try {
+        await localModels.load();
+      } catch (_) {
+        // No model folder (e.g. sandboxed tests): on-device models stay hidden.
+      }
+    }
+    _syncLocalModels();
+  }
+
+  /// Mirrors installed GGUF files into the On-device provider's model list.
+  void _syncLocalModels() {
+    final ids = [
+      for (final m in localModels.all)
+        if (localModels.installed.contains(m.id)) m.id,
+    ];
+    providers[ProviderKind.local] = ProviderSettings(kind: ProviderKind.local, models: ids);
+    if (provider == ProviderKind.local && !ids.contains(model) && !demoMode) {
+      final fallback = ProviderKind.values.firstWhere(
+          (k) => k != ProviderKind.local && hasKey(k),
+          orElse: () => ProviderKind.anthropic);
+      provider = fallback;
+      model = providers[fallback]!.models.first;
+    }
     notifyListeners();
   }
 
   // Settings
 
-  bool hasKey(ProviderKind k) =>
-      demoMode || k == ProviderKind.custom || (_keys[k]?.isNotEmpty ?? false);
+  bool hasKey(ProviderKind k) {
+    if (k == ProviderKind.local) {
+      return localSupported && localModels.installed.isNotEmpty;
+    }
+    return demoMode || k == ProviderKind.custom || (_keys[k]?.isNotEmpty ?? false);
+  }
   String keyFor(ProviderKind k) => _keys[k] ?? '';
 
-  /// Providers the user can chat with right now.
-  List<ProviderKind> get readyProviders =>
-      ProviderKind.values.where((k) => _keys.containsKey(k) || demoMode).toList();
+  @override
+  void dispose() {
+    localModels.removeListener(_syncLocalModels);
+    super.dispose();
+  }
 
   Future<void> setKey(ProviderKind k, String value) async {
     final v = value.trim();
@@ -177,7 +232,9 @@ class AppState extends ChangeNotifier {
     notifyListeners();
 
     if (!hasKey(provider)) {
-      reply.error = 'Add a ${provider.label} API key in Settings to start chatting.';
+      reply.error = provider == ProviderKind.local
+          ? 'Download an on-device model in Settings first.'
+          : 'Add a ${provider.label} API key in Settings to start chatting.';
       await _finish(c);
       return;
     }
@@ -192,6 +249,8 @@ class AppState extends ChangeNotifier {
         ))
         .listen(
           (d) {
+            streamingStatus =
+                d.text.isEmpty && d.reasoning.isEmpty ? d.status ?? streamingStatus : null;
             reply.text += d.text;
             reply.reasoning += d.reasoning;
             if (d.notice != null) reply.error = d.notice;
@@ -214,6 +273,7 @@ class AppState extends ChangeNotifier {
     _sub = null;
     _done = null;
     streamingMessage = null;
+    streamingStatus = null;
     c.updatedAt = DateTime.now();
     notifyListeners();
     await storage.saveConversation(c);

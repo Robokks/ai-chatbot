@@ -195,7 +195,8 @@ class _AssistantMessage extends StatelessWidget {
                   const SizedBox(width: 8),
                   if (message.model != null)
                     Text(
-                      prettyModel(message.model!),
+                      AppScope.read(context).localModels.byId(message.model!)?.name ??
+                          prettyModel(message.model!),
                       style: TextStyle(color: p.textMuted, fontSize: 12),
                     ),
                 ],
@@ -335,6 +336,7 @@ class _ThinkingDotsState extends State<_ThinkingDots>
   @override
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
+    final status = AppScope.of(context).streamingStatus;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: AnimatedBuilder(
@@ -342,6 +344,12 @@ class _ThinkingDotsState extends State<_ThinkingDots>
         builder: (_, _) => Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (status != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: Text(status,
+                    style: TextStyle(color: Palette.of(context).textMuted, fontSize: 14)),
+              ),
             for (var i = 0; i < 3; i++)
               Padding(
                 padding: const EdgeInsets.only(right: 5),

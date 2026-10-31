@@ -38,6 +38,10 @@ Flutter's debug key, which is fine for personal use but not for the Play Store.
 - **Rich markdown:** syntax-highlighted code blocks with copy, tables, LaTeX, and links.
 - **Thinking:** reasoning from Claude, DeepSeek-reasoner and Gemini appears in a collapsible
   "Thought process" section.
+- **On-device models (offline):** download a small GGUF model, such as Liquid AI's LFM2,
+  Gemma 3 1B or Qwen 2.5 1.5B, or paste any Hugging Face `.gguf` link. It runs on the phone
+  or PC through llama.cpp ([llamadart](https://pub.dev/packages/llamadart)), with no internet
+  and no API key. See [Offline models](#offline-models).
 - **Chat history** grouped by date, with search, rename and delete. It is stored locally.
 - **Claude-inspired design:** a warm palette, serif greeting, light/dark/system themes, a
   drawer on phones and a collapsible sidebar on desktop.
@@ -63,10 +67,31 @@ Flutter's debug key, which is fine for personal use but not for the Play Store.
 | OpenRouter | https://openrouter.ai/keys |
 | Groq | https://console.groq.com/keys |
 
+## Offline models
+
+Open **Settings → On-device models** (or the model picker → On-device → Download).
+
+| Model | Download | RAM needed | Notes |
+|---|---|---|---|
+| LFM2 350M | 230 MB | ~1 GB | Tiny, very fast |
+| LFM2 700M | 470 MB | ~1.5 GB | Fast on most phones |
+| **LFM2 1.2B** | 730 MB | ~2 GB | Recommended |
+| LFM2 2.6B | 1.6 GB | ~4 GB | Needs a recent phone or a PC |
+| Gemma 3 1B | 810 MB | ~2 GB | |
+| Qwen 2.5 1.5B | 1.1 GB | ~2.5 GB | Good at code |
+
+- Use **+ → Add a GGUF model** to paste any Hugging Face link (`hf://owner/repo/file.gguf`)
+  or pick a `.gguf` file already on the device. Q4_K_M files work best on phones.
+- Expect roughly 5–20 words per second on a phone with a 1B model, and much faster on a PC.
+  On-device models are simpler than the cloud models.
+- Images aren't supported offline. Text files and PDF text are.
+- Android needs a 64-bit phone with Android 10 or later. The model list lives in
+  `lib/data/local/local_models.dart`.
+
 ## Building releases
 
 ```bash
-flutter build apk --release        # build/app/outputs/flutter-apk/app-release.apk
+flutter build apk --release --target-platform android-arm64,android-x64
 flutter build appbundle --release  # Play Store
 flutter build windows --release    # build/windows/x64/runner/Release/ (run on Windows)
 ```

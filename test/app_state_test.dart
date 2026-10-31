@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:ai_chatbot/core/storage.dart';
 import 'package:ai_chatbot/data/llm/llm_provider.dart';
+import 'package:ai_chatbot/data/local/local_models.dart';
 import 'package:ai_chatbot/data/models.dart';
 import 'package:ai_chatbot/state/app_state.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,6 +27,7 @@ class FakeProvider extends LlmProvider {
 
 void main() {
   late Directory dir;
+  late Directory modelsDir;
   late Storage storage;
   late FakeProvider fake;
   late AppState state;
@@ -33,7 +35,9 @@ void main() {
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('chat_test');
     storage = await Storage.openAt(dir.path);
-    state = AppState(storage, providerFactory: (s, k) {
+    modelsDir = await Directory('${dir.path}/models').create();
+    state = AppState(storage, localModels: LocalModelStore(storage, dir: modelsDir),
+        providerFactory: (s, k) {
       return fake = FakeProvider(s, const [ChatDelta(text: 'Hello '), ChatDelta(text: 'there')]);
     });
     await state.load();
@@ -97,5 +101,20 @@ void main() {
     await state.delete(state.current!);
     expect(state.current, isNull);
     expect(storage.loadConversations(), isEmpty);
+  });
+
+  test('on-device provider is ready once a model file is present', () async {
+    expect(state.hasKey(ProviderKind.local), isFalse);
+    await File('${modelsDir.path}/LFM2-1.2B-Q4_K_M.gguf').writeAsBytes([0]);
+    await state.localModels.load();
+    expect(state.hasKey(ProviderKind.local), isTrue);
+    expect(state.providers[ProviderKind.local]!.models, ['LFM2-1.2B-Q4_K_M']);
+
+    await state.selectModel(ProviderKind.local, 'LFM2-1.2B-Q4_K_M');
+    await state.send('hi offline', []);
+    expect(state.current!.messages.last.text, 'Hello there');
+
+    await state.localModels.delete('LFM2-1.2B-Q4_K_M');
+    expect(state.provider, isNot(ProviderKind.local));
   });
 }

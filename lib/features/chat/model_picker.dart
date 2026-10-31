@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
+import '../settings/local_models_screen.dart';
 import '../settings/settings_screen.dart';
 
 /// Compact model selector shown in the composer.
@@ -24,12 +25,22 @@ class ModelPill extends StatelessWidget {
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 150),
               child: Text(
-                prettyModel(state.model),
+                state.provider == ProviderKind.local
+                    ? state.localModels.byId(state.model)?.name ?? state.model
+                    : prettyModel(state.model),
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: p.textMuted, fontSize: 13.5, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  color: p.textMuted,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
-            Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: p.textMuted),
+            Icon(
+              Icons.keyboard_arrow_down_rounded,
+              size: 18,
+              color: p.textMuted,
+            ),
           ],
         ),
       ),
@@ -69,10 +80,16 @@ class _ModelList extends StatelessWidget {
     final state = AppScope.of(context);
     final p = Palette.of(context);
     final accent = Theme.of(context).colorScheme.primary;
+    final available = ProviderKind.values.where(
+      (k) => k != ProviderKind.local || AppState.localSupported,
+    );
     final kinds = [
-      ...ProviderKind.values.where(state.hasKey),
-      ...ProviderKind.values.where((k) => !state.hasKey(k)),
+      ...available.where(state.hasKey),
+      ...available.where((k) => !state.hasKey(k)),
     ];
+    String label(ProviderKind k, String m) => k == ProviderKind.local
+        ? state.localModels.byId(m)?.name ?? m
+        : prettyModel(m);
 
     return ListView(
       controller: scroll,
@@ -89,16 +106,37 @@ class _ModelList extends StatelessWidget {
               children: [
                 ProviderAvatar(kind: k, size: 22),
                 const SizedBox(width: 10),
-                Text(k.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+                Text(
+                  k.label,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
                 const SizedBox(width: 6),
-                Text(k.vendor, style: TextStyle(color: p.textMuted, fontSize: 12.5)),
+                Text(
+                  k.vendor,
+                  style: TextStyle(color: p.textMuted, fontSize: 12.5),
+                ),
                 const Spacer(),
-                if (!state.hasKey(k))
+                if (k == ProviderKind.local)
                   TextButton(
                     onPressed: () {
                       Navigator.pop(context);
-                      Navigator.of(context).push(MaterialPageRoute<void>(
-                          builder: (_) => ProviderScreen(kind: k)));
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const LocalModelsScreen(),
+                        ),
+                      );
+                    },
+                    child: Text(state.hasKey(k) ? 'Manage' : 'Download'),
+                  )
+                else if (!state.hasKey(k))
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => ProviderScreen(kind: k),
+                        ),
+                      );
                     },
                     child: const Text('Add key'),
                   ),
@@ -108,7 +146,7 @@ class _ModelList extends StatelessWidget {
           if (state.hasKey(k))
             for (final m in state.providers[k]!.models)
               _ModelTile(
-                label: prettyModel(m),
+                label: label(k, m),
                 selected: state.provider == k && state.model == m,
                 accent: accent,
                 onTap: () {
@@ -150,8 +188,11 @@ class _ModelTile extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
               children: [
-                Expanded(child: Text(label, style: const TextStyle(fontSize: 15))),
-                if (selected) Icon(Icons.check_rounded, color: accent, size: 20),
+                Expanded(
+                  child: Text(label, style: const TextStyle(fontSize: 15)),
+                ),
+                if (selected)
+                  Icon(Icons.check_rounded, color: accent, size: 20),
               ],
             ),
           ),
@@ -175,6 +216,7 @@ class ProviderAvatar extends StatelessWidget {
     ProviderKind.gemini: Color(0xFF4285F4),
     ProviderKind.openrouter: Color(0xFF6566F1),
     ProviderKind.groq: Color(0xFFF55036),
+    ProviderKind.local: Color(0xFF3F7D58),
     ProviderKind.custom: Color(0xFF7A7A7A),
   };
 
@@ -188,14 +230,20 @@ class ProviderAvatar extends StatelessWidget {
         color: _colors[kind],
         borderRadius: BorderRadius.circular(size * 0.3),
       ),
-      child: Text(
-        kind.label[0],
-        style: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w700,
-          fontSize: size * 0.5,
-        ),
-      ),
+      child: kind == ProviderKind.local
+          ? Icon(
+              Icons.offline_bolt_rounded,
+              color: Colors.white,
+              size: size * 0.62,
+            )
+          : Text(
+              kind.label[0],
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: size * 0.5,
+              ),
+            ),
     );
   }
 }
