@@ -153,6 +153,24 @@ and A2A run on their own unless you turn on **Ask before each run** for that sou
 Tool use works with Claude, ChatGPT and other OpenAI-compatible APIs, Gemini,
 on-device models (if the model supports tool calling) and models on your home server.
 
+## Use Claude Code / Codex from another PC
+
+Have two PCs, but Claude Code or Codex is only on one (for example, the one with
+internet)? The other PC can use them through this app.
+
+1. **On the PC that has Claude Code / Codex:** open **Settings → Share this device** and turn
+   sharing on. Under **Coding agents**, switch on Claude Code and/or Codex, then tap
+   **Add folder** and pick the project folder. Choose **Read only** or **Can edit** for it.
+2. **On the other PC:** **Settings → Connect to a home server**, pair with the PIN, then
+   **Settings → Tools → Tools from <PC name>**.
+3. **In a chat** on the other PC, write for example *"Ask Claude Code to explain main.py"*.
+   You approve it twice: first on this PC, then **Allow / Allow for 30 min / Deny** on the PC
+   with the agent. No answer in 2 minutes means Deny.
+
+The agent can only work inside the folders you added. Your request is passed as text to the
+program, never as a command, and a run is stopped after 20 minutes.
+"Allow for 30 min" lets every run through during that time, from any paired device.
+
 ## Building releases
 
 ```bash

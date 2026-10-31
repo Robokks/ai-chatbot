@@ -30,7 +30,6 @@ class HostController extends ChangeNotifier implements HostBackend {
       agents: agentsSupported ? agents : null,
     )..addListener(notifyListeners);
     _load();
-    if (agentsSupported) agents.refresh();
   }
 
   final AppState app;
@@ -133,6 +132,8 @@ class HostController extends ChangeNotifier implements HostBackend {
 
   Future<void> start() async {
     error = null;
+    // Not awaited: tools appear on the next request once the check is done.
+    if (agentsSupported) agents.ensureDetected();
     try {
       await server.start(port: port);
       addresses = await HostServer.localAddresses();

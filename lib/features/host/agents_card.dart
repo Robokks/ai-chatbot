@@ -7,9 +7,23 @@ import '../../server/coding_agents.dart';
 import 'widgets.dart';
 
 /// Host screen card: share Claude Code / Codex and pick their folders.
-class AgentsCard extends StatelessWidget {
+class AgentsCard extends StatefulWidget {
   const AgentsCard({super.key, required this.hub});
   final AgentHub hub;
+
+  @override
+  State<AgentsCard> createState() => _AgentsCardState();
+}
+
+class _AgentsCardState extends State<AgentsCard> {
+  AgentHub get hub => widget.hub;
+
+  @override
+  void initState() {
+    super.initState();
+    // After the first frame, so the hub's notify doesn't land mid-build.
+    WidgetsBinding.instance.addPostFrameCallback((_) => hub.ensureDetected());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +37,7 @@ class AgentsCard extends StatelessWidget {
             secondary: const Icon(Icons.terminal_rounded),
             title: Text(a.label),
             subtitle: Text(
-              hub.detecting && !hub.versions.containsKey(a)
+              !hub.versions.containsKey(a)
                   ? 'Looking…'
                   : hub.versions[a] ?? 'Not found on this PC. ${a.installHint}',
               style: TextStyle(color: p.textMuted),

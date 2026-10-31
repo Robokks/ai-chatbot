@@ -1,15 +1,14 @@
 # Handover: Chatbot app (Flutter, Android + Windows)
 
-Last updated: 2026-10-31 (second handover). Repo `Robokks/ai-chatbot`, branch **`ccr-85a70df3-vqfuzv`**
-(there's no `main` yet; the repo is public). Last commit with a CI build: `399e547`. The commit after it, **"WIP: Claude
-Code / Codex sharing"**, used `[skip ci]` and is **untested** (see §2A).
+Last updated: 2026-10-31 (third session). Repo `Robokks/ai-chatbot`. Work now continues on branch
+**`ccr-9b78964b-7pqvaf`** (it contains everything from the older `ccr-85a70df3-vqfuzv`; there's no `main` yet;
+the repo is public). §2A is finished and tested.
 
 ## Paste this into the new chat
 
 > Continue the Flutter chatbot app in GitHub repo `Robokks/ai-chatbot`, branch
-> `ccr-85a70df3-vqfuzv`. Read `docs/HANDOVER.md` first. It describes the project, the
-> decisions made, and the unfinished work (section 2). Start with §2A: run the new
-> tests and fix them, then push so CI builds. Then ask me which item in §2B/§2C to do next.
+> `ccr-9b78964b-7pqvaf`. Read `docs/HANDOVER.md` first. It describes the project, the
+> decisions made, and the unfinished work (section 2). Ask me which item in §2B/§2C to do next.
 > Work on the same branch and push there. Keep `flutter analyze` clean and all tests passing.
 
 ---
@@ -65,7 +64,13 @@ Features done:
 
 ## 2. In progress / next steps
 
-### 2A. Claude Code / Codex from the offline PC: CODE WRITTEN, TESTS NOT RUN YET (do this first)
+### 2A. Claude Code / Codex from the offline PC: DONE
+
+All 10 tests in `test/coding_agents_test.dart` passed on the first run (99 tests in total). One fix was
+needed: the app checked `claude --version` / `codex --version` at every launch, which left a 20 s
+timer that broke `attach_sheet_test`. Now `AgentHub.ensureDetected()` runs only when sharing starts
+or the Coding agents card opens. README section "Use Claude Code / Codex from another PC" added.
+The notes below describe the design.
 
 **Need:** the user has 2 Windows PCs on one LAN. Only one has internet, and Claude Code and Codex are installed there only. From the offline PC they want to use Claude Code and Codex through this app. The plan was approved; it's in the old plan file and summarized here.
 
@@ -97,7 +102,7 @@ Changed files:
   - `tool_registry.dart`: `execute(call, {onProgress})`, with a per-source timeout.
   - `app_state.dart`: progress text goes to `streamingStatus`.
 
-`flutter analyze` was clean before the interruption. TODO:
+Original TODO (all done):
 1. `export PATH=/opt/flutter/bin:$PATH` (in the cloud container), then `flutter test test/coding_agents_test.dart` and fix any failures. Possible weak spots:
    - the stateless MCP 2026-07-28 protocol and progress notifications (if `sendProgress` gets no progressToken, progress silently does nothing; then check that the client sends one);
    - `JsonSchema.boolean`/`enumValues` serialisation;
@@ -186,7 +191,7 @@ The user wrote: "Integrate Image generator & ocr pdf voice cloner. All open sour
 - `llamadart` user_defines in `pubspec.yaml` limit Android to the CPU llama.cpp runtime (smaller APK). Android needs `minSdk 29`, 64-bit only.
 - Android `network_security_config.xml` allows cleartext, for LAN home servers.
 - The MCP server runs on its own port (`StreamableMcpServer`), main port + 1. Tool callbacks get no HTTP request or auth info (`RequestHandlerExtra.requestInfo`/`authInfo` are never filled), so the device name comes from the last authorized request.
-- In the cloud container Flutter is at `/opt/flutter/bin` (it's not on PATH).
+- In the cloud container Flutter is at `/opt/flutter/bin` (it's not on PATH). A fresh container may not have it: `git clone --depth 1 -b 3.47.9 https://github.com/flutter/flutter.git /opt/flutter`.
 - Claude tool loops need the signed thinking blocks replayed unchanged (`Message.providerBlocks`). Through the home server they travel as `x_provider_blocks`.
 - The web build has no llama.cpp, no server and no CLI. It's for demos and screenshots only.
 
@@ -196,8 +201,8 @@ Commit messages end with:
 
 ```
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01GbaKdxwm5ViashJ3vqDUQD
+Claude-Session: https://claude.ai/code/session_01GbaKe1ExEvqeDzkzNJrYLS
 ```
 
 (A new session should use its own session link if its system prompt gives one.) Push with
-`git push origin ccr-85a70df3-vqfuzv`. No PRs unless the user asks. Don't put model IDs in commits.
+`git push origin ccr-9b78964b-7pqvaf`. No PRs unless the user asks. Don't put model IDs in commits.

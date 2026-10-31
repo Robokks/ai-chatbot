@@ -53,6 +53,11 @@ class AgentHub extends ChangeNotifier implements AgentHost {
 
   bool get trusting => allowAllUntil != null && DateTime.now().isBefore(allowAllUntil!);
 
+  /// Looks for the agents once; later calls do nothing. Not run at app
+  /// start so normal launches never spawn `claude`/`codex`.
+  Future<void> ensureDetected() =>
+      detecting || versions.isNotEmpty ? Future.value() : refresh();
+
   Future<void> refresh() async {
     detecting = true;
     notifyListeners();
