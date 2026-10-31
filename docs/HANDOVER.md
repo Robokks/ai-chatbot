@@ -67,6 +67,9 @@ Features done:
 
 ### 2A. Claude Code / Codex from the offline PC: CODE WRITTEN, TESTS NOT RUN YET (do this first)
 
+> **Revised 2026-10-31:** for LabVIEW work, see **§2A-rev** below before finishing this. Files
+> must be created on the offline PC, not in a folder on the internet PC.
+
 **Need:** the user has 2 Windows PCs on one LAN. Only one has internet, and Claude Code and Codex are installed there only. From the offline PC they want to use Claude Code and Codex through this app. The plan was approved; it's in the old plan file and summarized here.
 
 **Design:** the internet PC runs the home server. It offers MCP tools `claude_code` and `codex`. The offline PC adds them with Tools → "Tools from <host>" (that already exists). Each run asks on the offline PC first (destructive tool), then shows **Allow / Allow for 30 min / Deny** on the internet PC. No answer in 2 minutes means deny.
@@ -108,6 +111,41 @@ Changed files:
    2. Offline PC: pair → Tools → "Tools from <PC>".
    3. Chat: "ask Claude Code to …" → approve on both PCs.
 4. Tell the user the steps above in simple words.
+
+### 2A-rev. REVISION for LabVIEW work (agreed 2026-10-31): files must be created on the OFFLINE PC
+
+Read this before finishing 2A. The design above runs Claude Code / Codex **in a folder on the
+internet PC**, so any file it creates lands on the internet PC. For LabVIEW work the user
+decided the opposite: **VIs and scripts are created and run only on the offline PC**. The
+internet PC only "thinks". The full design is in
+[Robokks/labview-ai-training- `docs/`](https://github.com/Robokks/labview-ai-training-/tree/ccr-da1e8f34-orde03/docs)
+(see `02-architecture.md`).
+
+What changes:
+- **Setup:** two Windows 10 Pro PCs on a **direct cable** (`192.168.50.1` = internet PC,
+  `192.168.50.2` = offline PC). Single user.
+- **The hands are on the offline PC.** It runs **DynasBrain's Tool Gateway**: MCP over HTTP on
+  the cable, offering DynasBrain knowledge tools, a curated labview-mcp tool set and a sandboxed
+  PowerShell/Python runner, with approvals on the offline PC. That is built in
+  `Robokks/labview-ai-assist`, not here.
+- **The shared agent on the internet PC must have no local file or shell access.** Start it the
+  way DynasBrain's `dynasbrain/ask.py` does:
+  `claude -p --mcp-config <file naming the offline gateway> --strict-mcp-config --tools "" --allowedTools <gateway tools> --permission-mode dontAsk`,
+  with the task over stdin. The offline gateway becomes its only toolbox. Codex needs the
+  equivalent: gateway MCP tools only, no workspace writes on the internet PC.
+- **Privacy:** each DynasBrain project is "Local AI only" (default) or "Cloud allowed". The
+  offline gateway enforces it. This app should show clearly when a request goes to a cloud
+  model, and offer a local model (the home server's) as the safe choice.
+- **Which UI:** for LabVIEW work the assumed entry point is DynasBrain's Ask page on the offline
+  PC, which sends the task to DynasBrain's relay on the internet PC. This app stays the general
+  chat window. It can also add the gateway as an MCP tool source and use it with a local model.
+
+What can stay: the approval queue (`AgentHub`), the overlay, progress notifications and the
+stdin-only argument rule are all still useful. A "folder on the internet PC" mode may stay
+for non-LabVIEW use, but it must **not** be the mode used for LabVIEW projects.
+
+Not decided yet: whether the relay lives in DynasBrain only (current plan) or this app's home
+server also offers a "gateway-only" agent mode. Ask the user before building either.
 
 ### 2B. NEW REQUEST (not planned yet): image generator, OCR for PDFs, voice cloner, on device
 
