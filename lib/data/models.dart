@@ -101,7 +101,70 @@ class UsageStats {
       );
 }
 
-enum Role { user, assistant }
+enum Role { user, assistant, tool }
+
+/// A tool the AI may call, from MCP, UTCP, A2A or a CLI program.
+class ToolSpec {
+  const ToolSpec({
+    required this.name,
+    required this.description,
+    required this.inputSchema,
+    required this.sourceId,
+    required this.sourceLabel,
+    this.needsApproval = false,
+  });
+
+  /// Name shown to the model: unique, `[A-Za-z0-9_-]{1,64}`.
+  final String name;
+  final String description;
+
+  /// JSON Schema (object) for the arguments.
+  final Map<String, dynamic> inputSchema;
+  final String sourceId;
+
+  /// e.g. "MCP · Old phone".
+  final String sourceLabel;
+
+  /// Ask the user before each run (always true for CLI tools).
+  final bool needsApproval;
+}
+
+/// A tool call made by the AI.
+class ToolCall {
+  ToolCall({required this.id, required this.name, required this.arguments});
+
+  final String id;
+  final String name;
+  final Map<String, dynamic> arguments;
+
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'arguments': arguments};
+
+  factory ToolCall.fromJson(Map<String, dynamic> j) => ToolCall(
+        id: j['id'] as String,
+        name: j['name'] as String,
+        arguments: Map<String, dynamic>.from(j['arguments'] as Map? ?? const {}),
+      );
+}
+
+/// What running a [ToolCall] returned.
+class ToolResult {
+  ToolResult({required this.callId, required this.name, required this.text, this.isError = false});
+
+  final String callId;
+  final String name;
+  final String text;
+  final bool isError;
+
+  Map<String, dynamic> toJson() =>
+      {'callId': callId, 'name': name, 'text': text, if (isError) 'isError': true};
+
+  factory ToolResult.fromJson(Map<String, dynamic> j) => ToolResult(
+        callId: j['callId'] as String,
+        name: j['name'] as String,
+        text: j['text'] as String,
+        isError: j['isError'] as bool? ?? false,
+      );
+}
 
 class Message {
   Message({
@@ -114,8 +177,13 @@ class Message {
     this.model,
     this.provider,
     this.usage,
+    List<ToolCall>? toolCalls,
+    List<ToolResult>? toolResults,
+    this.providerBlocks,
     DateTime? createdAt,
   })  : id = id ?? newId(),
+        toolCalls = toolCalls ?? [],
+        toolResults = toolResults ?? [],
         attachments = attachments ?? [],
         createdAt = createdAt ?? DateTime.now();
 
@@ -130,6 +198,17 @@ class Message {
   /// Provider that wrote this reply (for usage totals and pricing).
   ProviderKind? provider;
   UsageStats? usage;
+
+  /// Tools the assistant asked to run in this turn.
+  final List<ToolCall> toolCalls;
+
+  /// Results of those calls (on [Role.tool] messages).
+  final List<ToolResult> toolResults;
+
+  /// The provider's raw content for this turn (e.g. Claude thinking blocks
+  /// with signatures, Gemini thought signatures), replayed unchanged on the
+  /// next request when tools are involved.
+  List<Map<String, dynamic>>? providerBlocks;
   final DateTime createdAt;
 
   Map<String, dynamic> toJson() => {
@@ -143,6 +222,9 @@ class Message {
         if (model != null) 'model': model,
         if (provider != null) 'provider': provider!.name,
         if (usage != null) 'usage': usage!.toJson(),
+        if (toolCalls.isNotEmpty) 'toolCalls': [for (final c in toolCalls) c.toJson()],
+        if (toolResults.isNotEmpty) 'toolResults': [for (final r in toolResults) r.toJson()],
+        if (providerBlocks != null) 'providerBlocks': providerBlocks,
         'createdAt': createdAt.toIso8601String(),
       };
 
@@ -160,6 +242,17 @@ class Message {
         usage: j['usage'] == null
             ? null
             : UsageStats.fromJson(Map<String, dynamic>.from(j['usage'] as Map)),
+        toolCalls: [
+          for (final c in j['toolCalls'] as List? ?? const [])
+            ToolCall.fromJson(Map<String, dynamic>.from(c as Map)),
+        ],
+        toolResults: [
+          for (final r in j['toolResults'] as List? ?? const [])
+            ToolResult.fromJson(Map<String, dynamic>.from(r as Map)),
+        ],
+        providerBlocks: (j['providerBlocks'] as List?)
+            ?.map((b) => Map<String, dynamic>.from(b as Map))
+            .toList(),
         createdAt: DateTime.parse(j['createdAt'] as String),
       );
 }

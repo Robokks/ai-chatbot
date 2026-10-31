@@ -8,6 +8,7 @@ import '../../state/app_state.dart';
 import '../attachments/attachment_service.dart';
 import 'composer.dart';
 import 'message_tile.dart';
+import 'tool_calls_view.dart';
 
 const _maxContentWidth = 760.0;
 
@@ -69,6 +70,8 @@ class _ChatScreenState extends State<ChatScreen> {
               ? _Welcome(composerKey: _composerKey)
               : _messages(state, c),
         ),
+        if (state.pendingApproval != null)
+          _ComposerDock(child: ToolApprovalCard(request: state.pendingApproval!)),
         if (c != null && c.messages.isNotEmpty)
           _ComposerDock(child: Composer(key: _composerKey)),
       ],

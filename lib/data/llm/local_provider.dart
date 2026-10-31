@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:llamadart/llamadart.dart';
 
@@ -91,22 +92,46 @@ class LocalProvider extends LlmProvider {
     final turns = <LlamaChatMessage>[];
     var used = 0;
     for (final m in req.messages.reversed) {
-      final text = m.role == Role.user
-          ? inlineTextAttachments(m, includePdf: true)
-          : m.text;
-      if (text.isEmpty) continue;
-      if (turns.isNotEmpty && used + text.length > historyCharBudget) break;
-      used += text.length;
-      turns.insert(
-        0,
-        LlamaChatMessage.fromText(
-          role: m.role == Role.user ? LlamaChatRole.user : LlamaChatRole.assistant,
-          text: text,
-        ),
-      );
+      final List<LlamaChatMessage> converted;
+      final int size;
+      switch (m.role) {
+        case Role.user:
+          final text = inlineTextAttachments(m, includePdf: true);
+          if (text.isEmpty) continue;
+          size = text.length;
+          converted = [LlamaChatMessage.fromText(role: LlamaChatRole.user, text: text)];
+        case Role.assistant:
+          if (m.text.isEmpty && m.toolCalls.isEmpty) continue;
+          size = m.text.length + m.toolCalls.fold(0, (n, c) => n + jsonEncode(c.arguments).length);
+          converted = [
+            m.toolCalls.isEmpty
+                ? LlamaChatMessage.fromText(role: LlamaChatRole.assistant, text: m.text)
+                : LlamaChatMessage.withContent(role: LlamaChatRole.assistant, content: [
+                    if (m.text.isNotEmpty) LlamaTextContent(m.text),
+                    for (final c in m.toolCalls)
+                      LlamaToolCallContent(
+                        id: c.id,
+                        name: c.name,
+                        arguments: c.arguments,
+                        rawJson: jsonEncode(c.arguments),
+                      ),
+                  ]),
+          ];
+        case Role.tool:
+          size = m.toolResults.fold(0, (n, r) => n + r.text.length);
+          converted = [
+            for (final r in m.toolResults)
+              LlamaChatMessage.withContent(role: LlamaChatRole.tool, content: [
+                LlamaToolResultContent(id: r.callId, name: r.name, result: r.text),
+              ]),
+          ];
+      }
+      if (turns.isNotEmpty && used + size > historyCharBudget) break;
+      used += size;
+      turns.insertAll(0, converted);
     }
     // A history must start with the user.
-    while (turns.isNotEmpty && turns.first.role == LlamaChatRole.assistant) {
+    while (turns.isNotEmpty && turns.first.role != LlamaChatRole.user) {
       turns.removeAt(0);
     }
     final system = req.systemPrompt?.trim() ?? '';
@@ -121,6 +146,7 @@ class LocalProvider extends LlmProvider {
   Stream<ChatDelta> streamChat(ChatRequest request) {
     StreamSubscription<LlamaCompletionChunk>? sub;
     void Function()? release;
+    final calls = <int, ({String? id, StringBuffer name, StringBuffer args})>{};
     late final StreamController<ChatDelta> out;
     out = StreamController<ChatDelta>(
       onListen: () async {
@@ -137,6 +163,13 @@ class LocalProvider extends LlmProvider {
               .create(
                 toLlamaMessages(request),
                 params: const GenerationParams(maxTokens: 2048),
+                tools: request.tools.isEmpty
+                    ? null
+                    : [
+                        for (final t in request.tools)
+                          ToolDefinition.fromJsonSchema(
+                              name: t.name, description: t.description, schema: t.inputSchema),
+                      ],
               )
               .listen(
             (chunk) {
@@ -152,6 +185,12 @@ class LocalProvider extends LlmProvider {
               }
               if (chunk.choices.isEmpty) return;
               final d = chunk.choices.first.delta;
+              for (final tc in d.toolCalls ?? const <LlamaCompletionChunkToolCall>[]) {
+                final e = calls[tc.index] ??=
+                    (id: tc.id, name: StringBuffer(), args: StringBuffer());
+                e.name.write(tc.function?.name ?? '');
+                e.args.write(tc.function?.arguments ?? '');
+              }
               final text = d.content ?? '';
               final thinking = d.thinking ?? '';
               if (text.isNotEmpty || thinking.isNotEmpty) {
@@ -164,6 +203,18 @@ class LocalProvider extends LlmProvider {
               out.close();
             },
             onDone: () {
+              if (calls.isNotEmpty) {
+                final keys = calls.keys.toList()..sort();
+                out.add(ChatDelta(toolCalls: [
+                  for (final k in keys)
+                    if (calls[k]!.name.isNotEmpty)
+                      ToolCall(
+                        id: calls[k]!.id ?? 'call_$k',
+                        name: calls[k]!.name.toString(),
+                        arguments: decodeToolArgs(calls[k]!.args.toString()),
+                      ),
+                ]));
+              }
               release?.call();
               out.close();
             },

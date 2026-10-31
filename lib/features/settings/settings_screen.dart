@@ -8,6 +8,7 @@ import '../../state/app_state.dart';
 import '../chat/model_picker.dart';
 import '../host/connect_screen.dart';
 import '../host/host_screen.dart';
+import '../tools/tools_screen.dart';
 import 'local_models_screen.dart';
 import 'usage_screen.dart';
 
@@ -117,6 +118,26 @@ class SettingsScreen extends StatelessWidget {
               'Keys are stored encrypted on this device and sent only to the provider you chat with.',
               style: TextStyle(color: p.textMuted, fontSize: 12.5),
             ),
+          ),
+          const _SectionTitle('Tools'),
+          _Card(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.build_outlined),
+                title: const Text('Tools'),
+                subtitle: Text(
+                  state.tools.configs.isEmpty
+                      ? 'MCP, UTCP, A2A agents and command-line programs'
+                      : '${state.tools.configs.length} source${state.tools.configs.length == 1 ? '' : 's'}'
+                          ' · ${state.tools.activeTools().length} tools',
+                  style: TextStyle(color: p.textMuted),
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => const ToolsScreen(),
+                )),
+              ),
+            ],
           ),
           const _SectionTitle('Usage'),
           _Card(

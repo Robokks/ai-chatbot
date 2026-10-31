@@ -46,8 +46,10 @@ class BridgedRequest {
     required this.systemPrompt,
     required this.stream,
     required this.includeUsage,
+    this.tools = const [],
   });
 
+  final List<ToolSpec> tools;
   final String modelId;
   final List<Message> messages;
   final String? systemPrompt;
@@ -65,6 +67,7 @@ BridgedRequest parseChatRequest(Map<String, dynamic> body) {
 
   final system = <String>[];
   final messages = <Message>[];
+  final callNames = <String, String>{};
   for (final m in raw) {
     if (m is! Map) throw BridgeException('Each message must be an object');
     final role = m['role'];
@@ -74,7 +77,29 @@ BridgedRequest parseChatRequest(Map<String, dynamic> body) {
         final t = _text(content);
         if (t.isNotEmpty) system.add(t);
       case 'assistant':
-        messages.add(Message(role: Role.assistant, text: _text(content)));
+        final calls = <ToolCall>[
+          for (final c in m['tool_calls'] as List? ?? const [])
+            if (c is Map && c['function'] is Map)
+              ToolCall(
+                id: c['id'] as String? ?? 'call_${callNames.length}',
+                name: (c['function'] as Map)['name'] as String,
+                arguments: decodeToolArgs((c['function'] as Map)['arguments'] as String? ?? ''),
+              ),
+        ];
+        for (final c in calls) {
+          callNames[c.id] = c.name;
+        }
+        // Raw provider blocks sent back by a Chatbot client (see CompletionWriter).
+        final blocks = m['x_provider_blocks'];
+        messages.add(Message(
+          role: Role.assistant,
+          text: _text(content),
+          toolCalls: calls,
+          provider: ProviderKind.values.asNameMap()[m['x_provider']],
+          providerBlocks: blocks is List
+              ? [for (final b in blocks) Map<String, dynamic>.from(b as Map)]
+              : null,
+        ));
       case 'user':
         messages.add(Message(
           role: Role.user,
@@ -82,9 +107,14 @@ BridgedRequest parseChatRequest(Map<String, dynamic> body) {
           attachments: _images(content),
         ));
       case 'tool':
-        // Tool results from the client's own agent loop: pass as user context.
-        final t = _text(content);
-        if (t.isNotEmpty) messages.add(Message(role: Role.user, text: 'Tool result:\n$t'));
+        final id = m['tool_call_id'] as String? ?? '';
+        final result = ToolResult(callId: id, name: callNames[id] ?? 'tool', text: _text(content));
+        // Consecutive results belong to the same assistant turn.
+        if (messages.isNotEmpty && messages.last.role == Role.tool) {
+          messages.last.toolResults.add(result);
+        } else {
+          messages.add(Message(role: Role.tool, toolResults: [result]));
+        }
       default:
         throw BridgeException('Unsupported message role "$role"');
     }
@@ -93,7 +123,20 @@ BridgedRequest parseChatRequest(Map<String, dynamic> body) {
     throw BridgeException('At least one user message is required');
   }
   final streamOptions = body['stream_options'];
+  final tools = <ToolSpec>[
+    for (final t in body['tools'] as List? ?? const [])
+      if (t is Map && t['type'] == 'function' && t['function'] is Map)
+        ToolSpec(
+          name: (t['function'] as Map)['name'] as String,
+          description: (t['function'] as Map)['description'] as String? ?? '',
+          inputSchema: Map<String, dynamic>.from(
+              (t['function'] as Map)['parameters'] as Map? ?? {'type': 'object', 'properties': {}}),
+          sourceId: 'client',
+          sourceLabel: 'Client',
+        ),
+  ];
   return BridgedRequest(
+    tools: tools,
     modelId: model,
     messages: messages,
     systemPrompt: system.isEmpty ? null : system.join('\n\n'),
@@ -167,6 +210,9 @@ class CompletionWriter {
   final StringBuffer text = StringBuffer();
   final StringBuffer reasoning = StringBuffer();
   final UsageStats usage = UsageStats();
+  final List<ToolCall> toolCalls = [];
+  List<Map<String, dynamic>>? providerBlocks;
+  ProviderKind? provider;
   String finishReason = 'stop';
   bool _sentRole = false;
 
@@ -184,6 +230,26 @@ class CompletionWriter {
   Map<String, dynamic>? add(ChatDelta d) {
     if (d.usage != null) usage.merge(d.usage!);
     if (d.notice != null && d.notice!.contains('length')) finishReason = 'length';
+    if (d.providerBlocks != null) providerBlocks = d.providerBlocks;
+    if (d.toolCalls.isNotEmpty) {
+      final start = toolCalls.length;
+      toolCalls.addAll(d.toolCalls);
+      finishReason = 'tool_calls';
+      final delta = <String, dynamic>{
+        if (!_sentRole) 'role': 'assistant',
+        'tool_calls': [
+          for (final (i, c) in d.toolCalls.indexed)
+            {
+              'index': start + i,
+              'id': c.id,
+              'type': 'function',
+              'function': {'name': c.name, 'arguments': jsonEncode(c.arguments)},
+            },
+        ],
+      };
+      _sentRole = true;
+      return _chunk(delta);
+    }
     if (d.text.isEmpty && d.reasoning.isEmpty) return null;
     text.write(d.text);
     reasoning.write(d.reasoning);
@@ -196,7 +262,15 @@ class CompletionWriter {
     return _chunk(delta);
   }
 
-  Map<String, dynamic> finalChunk() => _chunk(const {}, finish: finishReason);
+  /// Chatbot clients replay these blocks with the next request (Claude needs
+  /// its signed thinking blocks back during a tool loop). Other OpenAI
+  /// clients ignore the unknown fields.
+  Map<String, dynamic> finalChunk() => _chunk({
+        if (providerBlocks != null) ...{
+          'x_provider': provider?.name,
+          'x_provider_blocks': providerBlocks,
+        },
+      }, finish: finishReason);
 
   Map<String, dynamic>? usageChunk() => usage.inputTokens == null && usage.outputTokens == null
       ? null
@@ -225,8 +299,21 @@ class CompletionWriter {
             'index': 0,
             'message': {
               'role': 'assistant',
-              'content': text.toString(),
+              'content': text.isEmpty && toolCalls.isNotEmpty ? null : text.toString(),
               if (reasoning.isNotEmpty) 'reasoning_content': reasoning.toString(),
+              if (toolCalls.isNotEmpty)
+                'tool_calls': [
+                  for (final c in toolCalls)
+                    {
+                      'id': c.id,
+                      'type': 'function',
+                      'function': {'name': c.name, 'arguments': jsonEncode(c.arguments)},
+                    },
+                ],
+              if (providerBlocks != null) ...{
+                'x_provider': provider?.name,
+                'x_provider_blocks': providerBlocks,
+              },
             },
             'finish_reason': finishReason,
           },

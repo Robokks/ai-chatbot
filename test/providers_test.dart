@@ -51,7 +51,12 @@ void main() {
       expect(content[2]['type'], 'text');
       expect(content[2]['text'], contains('notes'));
       expect(content[2]['text'], isNot(contains('PDF TEXT')));
-      expect(msgs[1], {'role': 'assistant', 'content': 'Sure.'});
+      expect(msgs[1], {
+        'role': 'assistant',
+        'content': [
+          {'type': 'text', 'text': 'Sure.'},
+        ],
+      });
     });
 
     test('omits thinking for older models', () {

@@ -340,11 +340,12 @@ class HostServer extends ChangeNotifier {
     }
     final (kind, model) = route;
     final provider = backend.providerFor(kind);
-    final writer = CompletionWriter(parsed.modelId);
+    final writer = CompletionWriter(parsed.modelId)..provider = kind;
     final stream = provider.streamChat(ChatRequest(
       model: model,
       messages: parsed.messages,
       systemPrompt: parsed.systemPrompt,
+      tools: parsed.tools,
     ));
 
     activeRequests++;

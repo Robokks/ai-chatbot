@@ -16,6 +16,8 @@ class ChatDelta {
     this.notice,
     this.status,
     this.usage,
+    this.toolCalls = const [],
+    this.providerBlocks,
   });
   final String text;
   final String reasoning;
@@ -28,6 +30,12 @@ class ChatDelta {
 
   /// Token counts reported by the provider (often only on the last event).
   final UsageStats? usage;
+
+  /// Complete tool calls, emitted once their arguments have fully arrived.
+  final List<ToolCall> toolCalls;
+
+  /// Raw provider content for the finished turn (see [Message.providerBlocks]).
+  final List<Map<String, dynamic>>? providerBlocks;
 }
 
 class ChatRequest {
@@ -35,10 +43,25 @@ class ChatRequest {
     required this.model,
     required this.messages,
     this.systemPrompt,
+    this.tools = const [],
   });
   final String model;
   final List<Message> messages;
   final String? systemPrompt;
+
+  /// Tools the model may call this turn.
+  final List<ToolSpec> tools;
+}
+
+/// Decodes a tool call's JSON arguments, tolerating empty or invalid text.
+Map<String, dynamic> decodeToolArgs(String raw) {
+  if (raw.trim().isEmpty) return {};
+  try {
+    final v = jsonDecode(raw);
+    return v is Map<String, dynamic> ? v : {'value': v};
+  } catch (_) {
+    return {'_raw': raw};
+  }
 }
 
 class LlmException implements Exception {

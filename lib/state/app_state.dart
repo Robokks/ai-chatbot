@@ -11,6 +11,7 @@ import '../data/local/local_models.dart';
 import '../data/models.dart';
 import '../server/discovery.dart';
 import '../server/host_controller.dart';
+import '../tools/tool_registry.dart';
 
 const demoMode = bool.fromEnvironment('DEMO');
 
@@ -21,7 +22,9 @@ class AppState extends ChangeNotifier {
     this.storage, {
     LlmProvider Function(ProviderSettings, String)? providerFactory,
     LocalModelStore? localModels,
-  }) : localModels = localModels ?? LocalModelStore(storage) {
+    ToolRegistry? tools,
+  })  : localModels = localModels ?? LocalModelStore(storage),
+        tools = tools ?? ToolRegistry(storage) {
     _providerFactory = providerFactory ?? _defaultProvider;
     this.localModels.addListener(_syncLocalModels);
   }
@@ -30,6 +33,9 @@ class AppState extends ChangeNotifier {
 
   /// Host mode: sharing this device's models on the local network.
   late final HostController host = HostController(this);
+
+  /// MCP servers, UTCP manuals, A2A agents and CLI programs the AI can use.
+  final ToolRegistry tools;
 
   /// GGUF models downloaded to this device.
   final LocalModelStore localModels;
@@ -66,6 +72,7 @@ class AppState extends ChangeNotifier {
 
   /// Times the reply being streamed.
   Stopwatch? _clock;
+  bool _stopped = false;
 
   Future<void> load() async {
     for (final k in ProviderKind.values) {
@@ -80,6 +87,8 @@ class AppState extends ChangeNotifier {
         ProviderKind.anthropic;
     model = storage.getSetting('model') ?? providers[provider]!.models.firstOrNull ?? '';
     conversations = storage.loadConversations();
+    await tools.load();
+    if (!demoMode) unawaited(tools.connectAll());
     if (localSupported) {
       try {
         await localModels.load();
@@ -267,7 +276,7 @@ class AppState extends ChangeNotifier {
   Future<void> regenerate() async {
     final c = current;
     if (c == null || isStreaming) return;
-    while (c.messages.isNotEmpty && c.messages.last.role == Role.assistant) {
+    while (c.messages.isNotEmpty && c.messages.last.role != Role.user) {
       c.messages.removeLast();
     }
     if (c.messages.isEmpty) return;
@@ -285,25 +294,68 @@ class AppState extends ChangeNotifier {
     await _reply(c);
   }
 
+  /// Most tool rounds per reply before the app stops the loop.
+  static const maxToolRounds = 10;
+
+  /// Answers the user, running tools the AI asks for until it is done.
   Future<void> _reply(Conversation c) async {
-    final history = List.of(c.messages);
-    final reply = Message(
-        role: Role.assistant, model: model, provider: provider, usage: UsageStats());
-    _clock = Stopwatch()..start();
-    c.messages.add(reply);
-    c.updatedAt = DateTime.now();
+    _stopped = false;
     _bumpToTop(c);
-    streamingMessage = reply;
-    notifyListeners();
+    for (var round = 0;; round++) {
+      final reply = Message(
+          role: Role.assistant, model: model, provider: provider, usage: UsageStats());
+      _clock = Stopwatch()..start();
+      final history = List.of(c.messages);
+      c.messages.add(reply);
+      c.updatedAt = DateTime.now();
+      streamingMessage = reply;
+      notifyListeners();
 
-    if (!hasKey(provider)) {
-      reply.error = provider == ProviderKind.local
-          ? 'Download an on-device model in Settings first.'
-          : 'Add a ${provider.label} API key in Settings to start chatting.';
-      await _finish(c);
-      return;
+      if (!hasKey(provider)) {
+        reply.error = provider == ProviderKind.local
+            ? 'Download an on-device model in Settings first.'
+            : 'Add a ${provider.label} API key in Settings to start chatting.';
+        return _finish(c);
+      }
+
+      final offered = demoMode ? const <ToolSpec>[] : tools.activeTools();
+      await _stream(reply, history, offered);
+      if (_stopped || reply.toolCalls.isEmpty) return _finish(c);
+      if (round + 1 >= maxToolRounds) {
+        reply.error = 'Stopped after $maxToolRounds rounds of tool use.';
+        return _finish(c);
+      }
+
+      // Run the requested tools, then let the AI continue with the results.
+      _closeTiming(reply);
+      final results = <ToolResult>[];
+      for (final call in reply.toolCalls) {
+        if (_stopped) break;
+        final spec = offered.where((t) => t.name == call.name).firstOrNull;
+        if (spec != null && spec.needsApproval && !await _askApproval(call, spec)) {
+          results.add(ToolResult(
+              callId: call.id,
+              name: call.name,
+              text: 'The user declined to run this tool.',
+              isError: true));
+          continue;
+        }
+        streamingStatus = 'Running ${spec?.sourceLabel ?? call.name}…';
+        notifyListeners();
+        results.add(await tools.execute(call));
+      }
+      // Every call needs a result, even when the user pressed stop.
+      for (final call in reply.toolCalls.skip(results.length)) {
+        results.add(ToolResult(callId: call.id, name: call.name, text: 'Stopped by the user.', isError: true));
+      }
+      c.messages.add(Message(role: Role.tool, toolResults: results));
+      streamingStatus = null;
+      await storage.saveConversation(c);
+      if (_stopped) return _finish(c);
     }
+  }
 
+  Future<void> _stream(Message reply, List<Message> history, List<ToolSpec> offered) async {
     final llm = _providerFactory(providers[provider]!, keyFor(provider));
     final done = _done = Completer<void>();
     _sub = llm
@@ -311,18 +363,21 @@ class AppState extends ChangeNotifier {
           model: model,
           messages: history,
           systemPrompt: systemPrompt,
+          tools: offered,
         ))
         .listen(
           (d) {
             streamingStatus =
                 d.text.isEmpty && d.reasoning.isEmpty ? d.status ?? streamingStatus : null;
             if (d.usage != null) reply.usage!.merge(d.usage!);
-            if ((d.text.isNotEmpty || d.reasoning.isNotEmpty) &&
+            if ((d.text.isNotEmpty || d.reasoning.isNotEmpty || d.toolCalls.isNotEmpty) &&
                 reply.usage!.firstTokenMs == null) {
               reply.usage!.firstTokenMs = _clock?.elapsedMilliseconds;
             }
             reply.text += d.text;
             reply.reasoning += d.reasoning;
+            reply.toolCalls.addAll(d.toolCalls);
+            if (d.providerBlocks != null) reply.providerBlocks = d.providerBlocks;
             if (d.notice != null) reply.error = d.notice;
             notifyListeners();
           },
@@ -336,14 +391,39 @@ class AppState extends ChangeNotifier {
           cancelOnError: true,
         );
     await done.future;
-    await _finish(c);
+    _sub = null;
+    _done = null;
+  }
+
+  void _closeTiming(Message reply) {
+    if (reply.usage != null && _clock != null && reply.usage!.firstTokenMs != null) {
+      reply.usage!.durationMs = _clock!.elapsedMilliseconds;
+    }
+  }
+
+  /// A tool run waiting for the user's OK.
+  ToolApprovalRequest? pendingApproval;
+
+  Future<bool> _askApproval(ToolCall call, ToolSpec spec) async {
+    final request = pendingApproval = ToolApprovalRequest(call, spec, tools.describe(call));
+    streamingStatus = 'Waiting for your approval…';
+    notifyListeners();
+    final ok = await request._answer.future;
+    pendingApproval = null;
+    streamingStatus = null;
+    notifyListeners();
+    return ok;
+  }
+
+  /// Allows or denies the pending tool run.
+  void answerApproval(bool allow) {
+    final r = pendingApproval;
+    if (r != null && !r._answer.isCompleted) r._answer.complete(allow);
   }
 
   Future<void> _finish(Conversation c) async {
     final reply = streamingMessage;
-    if (reply?.usage != null && _clock != null && reply!.usage!.firstTokenMs != null) {
-      reply.usage!.durationMs = _clock!.elapsedMilliseconds;
-    }
+    if (reply != null) _closeTiming(reply);
     _clock = null;
     _sub = null;
     _done = null;
@@ -356,6 +436,8 @@ class AppState extends ChangeNotifier {
 
   /// Cancels the reply in progress; whatever streamed so far is kept.
   void stop() {
+    _stopped = true;
+    answerApproval(false);
     _sub?.cancel();
     if (!(_done?.isCompleted ?? true)) _done!.complete();
   }
@@ -382,4 +464,16 @@ class AppScope extends InheritedNotifier<AppState> {
 
   static AppState read(BuildContext context) =>
       context.getInheritedWidgetOfExactType<AppScope>()!.notifier!;
+}
+
+/// A tool run that needs the user's OK.
+class ToolApprovalRequest {
+  ToolApprovalRequest(this.call, this.spec, this.preview);
+
+  final ToolCall call;
+  final ToolSpec spec;
+
+  /// What will run: the command line for CLI tools, else the arguments.
+  final String preview;
+  final Completer<bool> _answer = Completer<bool>();
 }

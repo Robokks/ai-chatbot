@@ -135,6 +135,24 @@ Security: only paired devices and apps with an access key can use the server; re
 device on the host to revoke it. Wrong PINs are rate-limited and the PIN rotates. Traffic on
 the Wi-Fi isn't encrypted, so share only on networks you trust.
 
+## Tools (MCP, UTCP, A2A, CLI)
+
+The AI can use tools while it answers. Add them under **Settings → Tools**:
+
+| Type | What you enter | Notes |
+|---|---|---|
+| **MCP server** | Streamable HTTP URL (+ optional bearer key) | Any MCP server; tools are listed automatically |
+| **UTCP manual** | Manual URL (+ optional key, `NAME=value` variables) | HTTP tools are called directly; `cli` tools run on a PC if their programs are allowlisted |
+| **A2A agent** | Agent URL or agent card URL (+ optional key) | Becomes an "ask" tool; A2A 1.0 and 0.3 |
+| **CLI program** (Windows/PC) | Program name or path, e.g. `git` | Allowlist: the AI can only run programs you add, and **every run asks you first**, showing the exact command |
+
+If you're paired with a home server, **Tools from <host>** adds its MCP tools in one tap.
+
+Every tool call appears in the chat. Tap it to see the input and result. Tools from MCP, UTCP
+and A2A run on their own unless you turn on **Ask before each run** for that source.
+Tool use works with Claude, ChatGPT and other OpenAI-compatible APIs, Gemini,
+on-device models (if the model supports tool calling) and models on your home server.
+
 ## Building releases
 
 ```bash

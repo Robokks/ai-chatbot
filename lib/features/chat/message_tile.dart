@@ -7,6 +7,7 @@ import '../../state/app_state.dart';
 import 'attachment_chip.dart';
 import 'markdown_view.dart';
 import 'model_picker.dart';
+import 'tool_calls_view.dart';
 import 'usage_sheet.dart';
 
 class MessageTile extends StatelessWidget {
@@ -23,9 +24,12 @@ class MessageTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return message.role == Role.user
-        ? _UserMessage(message: message, editable: isLast || _isLastUser(context))
-        : _AssistantMessage(message: message, isLast: isLast, streaming: streaming);
+    return switch (message.role) {
+      Role.user => _UserMessage(message: message, editable: isLast || _isLastUser(context)),
+      Role.assistant => _AssistantMessage(message: message, isLast: isLast, streaming: streaming),
+      // Shown inside the assistant turn that called the tools.
+      Role.tool => const SizedBox.shrink(),
+    };
   }
 
   bool _isLastUser(BuildContext context) {
@@ -162,7 +166,7 @@ class _AssistantMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = Palette.of(context);
-    final waiting = streaming && message.text.isEmpty;
+    final waiting = streaming && message.text.isEmpty && message.toolCalls.isEmpty;
     return Padding(
       padding: const EdgeInsets.only(top: 12, bottom: 4),
       child: Column(
@@ -172,6 +176,7 @@ class _AssistantMessage extends StatelessWidget {
             _ThinkingSection(text: message.reasoning, active: waiting),
           if (waiting && message.reasoning.isEmpty) const _ThinkingDots(),
           if (message.text.isNotEmpty) MarkdownView(message.text),
+          if (message.toolCalls.isNotEmpty) ToolCallsView(message: message, streaming: streaming),
           if (message.error != null)
             _ErrorCard(
               message: message.error!,
