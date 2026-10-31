@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 
 import '../data/llm/llm_provider.dart';
 import '../data/models.dart';
+import 'host_mcp.dart';
+import 'host_protocols.dart';
 import 'openai_bridge.dart';
 
 /// What the host needs from the app: which models it shares and how to
@@ -87,6 +89,7 @@ class HostServer extends ChangeNotifier {
   static const maxPinAttempts = 5;
 
   HttpServer? _server;
+  HostMcpServer? _mcp;
   Future<void> Function()? _stopAdvertising;
   List<PairedDevice> devices = [];
   final List<HostLogEntry> log = [];
@@ -99,6 +102,9 @@ class HostServer extends ChangeNotifier {
 
   bool get running => _server != null;
   int? get port => _server?.port;
+
+  /// MCP (Streamable HTTP) runs on its own port, next to the main one.
+  int? get mcpPort => _mcp?.port;
 
   /// Six-digit pairing code; rotates every 10 minutes and after each pairing.
   String get pin {
@@ -118,12 +124,29 @@ class HostServer extends ChangeNotifier {
     return 'cbh_${base64Url.encode(bytes).replaceAll('=', '')}';
   }
 
-  Future<void> start({int port = defaultHostPort, InternetAddress? address}) async {
+  Future<void> start({
+    int port = defaultHostPort,
+    InternetAddress? address,
+    bool mcp = true,
+  }) async {
     if (running) return;
     devices = await loadDevices();
     newPin();
     _server = await HttpServer.bind(address ?? InternetAddress.anyIPv4, port, shared: true);
     _server!.listen(_handle, onError: (_) {});
+    if (mcp) {
+      final m = _mcp = HostMcpServer(
+        hostName: () => backend.deviceName,
+        models: backend.sharedModels,
+        run: runPrompt,
+        authorize: (req) => authenticate(req) != null,
+      );
+      try {
+        await m.start(port == 0 ? 0 : port + 1);
+      } catch (_) {
+        _mcp = null; // Port taken: the rest of the server still works.
+      }
+    }
     try {
       _stopAdvertising = await advertise?.call(backend.deviceName, _server!.port);
     } catch (_) {
@@ -133,6 +156,8 @@ class HostServer extends ChangeNotifier {
   }
 
   Future<void> stop() async {
+    await _mcp?.stop();
+    _mcp = null;
     await _stopAdvertising?.call();
     _stopAdvertising = null;
     await _server?.close(force: true);
@@ -188,8 +213,15 @@ class HostServer extends ChangeNotifier {
         });
       }
       if (req.method == 'POST' && path == '/pair') return await _pair(req);
+      if (req.method == 'GET' && path == '/.well-known/agent-card.json') {
+        return await _json(res, 200, a2aAgentCard(
+          origin: req.requestedUri.origin,
+          hostName: backend.deviceName,
+          models: backend.sharedModels(),
+        ));
+      }
 
-      final device = _authenticate(req);
+      final device = authenticate(req);
       if (device == null) {
         return await _json(res, 401, {
           'error': {
@@ -206,6 +238,15 @@ class HostServer extends ChangeNotifier {
       if (req.method == 'POST' && (path == '/v1/chat/completions' || path == '/chat/completions')) {
         return await _chat(req, device);
       }
+      if (req.method == 'GET' && path == '/utcp') {
+        return await _json(res, 200, utcpManual(
+          origin: req.requestedUri.origin,
+          hostName: backend.deviceName,
+          models: backend.sharedModels(),
+        ));
+      }
+      if (req.method == 'POST' && path == '/tools/chat') return await _toolChat(req, device);
+      if (req.method == 'POST' && path == '/a2a') return await _a2a(req, device);
       await _json(res, 404, {
         'error': {'message': 'Not found: ${req.method} ${req.uri.path}', 'type': 'not_found'},
       });
@@ -220,7 +261,8 @@ class HostServer extends ChangeNotifier {
     }
   }
 
-  PairedDevice? _authenticate(HttpRequest req) {
+  /// The paired device whose access key [req] carries, if any.
+  PairedDevice? authenticate(HttpRequest req) {
     var token = req.headers.value('x-api-key');
     final auth = req.headers.value(HttpHeaders.authorizationHeader);
     if (auth != null && auth.toLowerCase().startsWith('bearer ')) token = auth.substring(7).trim();
@@ -362,11 +404,186 @@ class HostServer extends ChangeNotifier {
       }
     } finally {
       activeRequests--;
-      log.insert(0, HostLogEntry(device.name, parsed.modelId, status,
-          outputTokens: writer.usage.outputTokens));
-      if (log.length > 50) log.removeLast();
-      notifyListeners();
+      _logEntry(device.name, parsed.modelId, status, writer.usage.outputTokens);
     }
+  }
+
+  /// Default model for tools that don't name one: on-device first.
+  String? get defaultModelId {
+    final shared = backend.sharedModels();
+    if (shared.isEmpty) return null;
+    return shared.firstWhere((m) => m.kind == ProviderKind.local, orElse: () => shared.first).id;
+  }
+
+  Stream<ChatDelta> _streamFor(String? modelId, List<Message> messages, String? system) {
+    final id = modelId ?? defaultModelId;
+    final route = id == null ? null : SharedModel.parseId(id);
+    if (route == null || !backend.sharedModels().any((m) => m.id == id)) {
+      throw BridgeException('Model "${id ?? ''}" is not shared by this host',
+          status: 404, code: 'model_not_found');
+    }
+    return backend
+        .providerFor(route.$1)
+        .streamChat(ChatRequest(model: route.$2, messages: messages, systemPrompt: system));
+  }
+
+  /// Runs [prompt] on a shared model and returns (answer, model id).
+  /// Used by the MCP, UTCP and A2A front ends.
+  Future<(String, String)> runPrompt(String? model, String prompt, String? system,
+      {String device = 'Tool client'}) async {
+    final id = model ?? defaultModelId ?? '';
+    final writer = CompletionWriter(id);
+    var status = 'ok';
+    activeRequests++;
+    notifyListeners();
+    try {
+      await for (final d in _streamFor(model, [Message(role: Role.user, text: prompt)], system)) {
+        writer.add(d);
+      }
+      return (writer.text.toString(), id);
+    } catch (_) {
+      status = 'error';
+      rethrow;
+    } finally {
+      activeRequests--;
+      _logEntry(device, id, status, writer.usage.outputTokens);
+    }
+  }
+
+  void _logEntry(String device, String model, String status, int? tokens) {
+    log.insert(0, HostLogEntry(device, model, status, outputTokens: tokens));
+    if (log.length > 50) log.removeLast();
+    notifyListeners();
+  }
+
+  /// Simple REST tool used by the UTCP manual.
+  Future<void> _toolChat(HttpRequest req, PairedDevice device) async {
+    final body = await _readJson(req);
+    final prompt = body['prompt'];
+    if (prompt is! String || prompt.trim().isEmpty) throw BridgeException('"prompt" is required');
+    try {
+      final (text, model) = await runPrompt(
+          body['model'] as String?, prompt, body['system'] as String?, device: device.name);
+      await _json(req.response, 200, {'text': text, 'model': model});
+    } on BridgeException {
+      rethrow;
+    } catch (e) {
+      await _json(req.response, 502, {
+        'error': {'message': e.toString(), 'type': 'provider_error'},
+      });
+    }
+  }
+
+  /// A2A 1.0 JSON-RPC: SendMessage and SendStreamingMessage.
+  Future<void> _a2a(HttpRequest req, PairedDevice device) async {
+    final res = req.response;
+    Map<String, dynamic> body;
+    try {
+      body = await _readJson(req);
+    } on BridgeException {
+      return _jsonText(res, 200, jsonRpcError(null, -32700, 'Invalid JSON payload'));
+    }
+    final id = body['id'];
+    final method = body['method'];
+    String newId() => _newKey().substring(4, 24);
+    try {
+      switch (method) {
+        case 'SendMessage' || 'message/send':
+          final a = parseA2aSend(body['params'], newId);
+          final (text, _) = await runPrompt(a.model, a.text, null, device: '${device.name} (A2A)');
+          return await _jsonText(res, 200,
+              jsonRpcResult(id, {'message': a2aMessage(text, a.contextId, newId())}));
+        case 'SendStreamingMessage' || 'message/stream':
+          final a = parseA2aSend(body['params'], newId);
+          return await _a2aStream(res, id, a, device, newId);
+        case 'GetTask' || 'CancelTask' || 'SubscribeToTask':
+          return await _jsonText(res, 200, jsonRpcError(id, -32001, 'Task not found'));
+        default:
+          return await _jsonText(res, 200, jsonRpcError(id, -32601, 'Method not found'));
+      }
+    } on A2aError catch (e) {
+      return await _jsonText(res, 200, jsonRpcError(id, e.code, e.message));
+    } on BridgeException catch (e) {
+      return await _jsonText(res, 200, jsonRpcError(id, -32602, e.message));
+    } catch (e) {
+      return await _jsonText(res, 200, jsonRpcError(id, -32603, 'Internal error: $e'));
+    }
+  }
+
+  Future<void> _a2aStream(
+    HttpResponse res,
+    Object? id,
+    A2aRequest a,
+    PairedDevice device,
+    String Function() newId,
+  ) async {
+    final stream = _streamFor(a.model, [Message(role: Role.user, text: a.text)], null);
+    final taskId = newId(), artifactId = newId();
+    res.headers
+      ..contentType = ContentType('text', 'event-stream', charset: 'utf-8')
+      ..set('cache-control', 'no-cache');
+    res.bufferOutput = false;
+    void send(Map<String, dynamic> result) {
+      try {
+        res.write('data: ${jsonRpcResult(id, result)}\n\n');
+      } catch (_) {}
+    }
+
+    send({
+      'task': {
+        'id': taskId,
+        'contextId': a.contextId,
+        'status': {'state': 'TASK_STATE_WORKING'},
+      },
+    });
+    var state = 'TASK_STATE_COMPLETED';
+    String? error;
+    activeRequests++;
+    notifyListeners();
+    try {
+      await for (final d in stream) {
+        if (d.text.isEmpty) continue;
+        send({
+          'artifactUpdate': {
+            'taskId': taskId,
+            'contextId': a.contextId,
+            'artifact': {
+              'artifactId': artifactId,
+              'parts': [
+                {'text': d.text},
+              ],
+            },
+            'append': true,
+          },
+        });
+      }
+    } catch (e) {
+      state = 'TASK_STATE_FAILED';
+      error = e.toString();
+    } finally {
+      activeRequests--;
+      _logEntry('${device.name} (A2A)', a.model ?? defaultModelId ?? '', error == null ? 'ok' : 'error', null);
+    }
+    send({
+      'statusUpdate': {
+        'taskId': taskId,
+        'contextId': a.contextId,
+        'status': {
+          'state': state,
+          if (error != null) 'message': a2aMessage(error, a.contextId, newId()),
+        },
+      },
+    });
+    try {
+      await res.close();
+    } catch (_) {}
+  }
+
+  static Future<void> _jsonText(HttpResponse res, int status, String body) async {
+    res.statusCode = status;
+    res.headers.contentType = ContentType.json;
+    res.write(body);
+    await res.close();
   }
 
   static void _sse(HttpResponse res, Map<String, dynamic> data) {

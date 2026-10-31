@@ -116,6 +116,21 @@ curl http://192.168.1.23:8484/v1/chat/completions \
 `anthropic/claude-sonnet-5-5`. Streaming (`"stream": true`) and
 `stream_options.include_usage` work as with OpenAI.
 
+The host also speaks the common tool and agent protocols, all with the same access key:
+
+| Protocol | Address | Use it from |
+|---|---|---|
+| **MCP** (Streamable HTTP) | `http://<host>:8485/mcp` | Claude Desktop, Claude Code, Cursor, VS Code: tools `list_models` and `chat` |
+| **UTCP** v1 manual | `http://<host>:8484/utcp` | UTCP clients: HTTP tools `list_models` and `chat` (`POST /tools/chat`); set the variable `CHATBOT_HOST_KEY` to your key |
+| **A2A** 1.0 | Agent Card at `http://<host>:8484/.well-known/agent-card.json`, JSON-RPC at `/a2a` | Agent frameworks: `SendMessage` and `SendStreamingMessage`; pick a model with `metadata.model` |
+
+For example, to add the host to Claude Code:
+
+```bash
+claude mcp add --transport http phone-ai http://192.168.1.23:8485/mcp \
+  --header "Authorization: Bearer cbh_..."
+```
+
 Security: only paired devices and apps with an access key can use the server; remove a
 device on the host to revoke it. Wrong PINs are rate-limited and the PIN rotates. Traffic on
 the Wi-Fi isn't encrypted, so share only on networks you trust.

@@ -199,13 +199,28 @@ class _OtherApps extends StatelessWidget {
     return CardBox(
       padding: const EdgeInsets.all(16),
       children: [
-        Text('Apps that support the OpenAI API (Open WebUI, Continue, scripts using the '
-            'OpenAI SDK) can use this server with this base URL and an access key.',
+        Text('Other apps can use this server with an access key: anything that supports '
+            'the OpenAI API, MCP, UTCP or A2A.',
             style: const TextStyle(fontSize: 14, height: 1.45)),
         if (base != null) ...[
           const SizedBox(height: 12),
-          Text('Base URL', style: TextStyle(color: p.textMuted, fontSize: 12.5)),
+          Text('OpenAI-compatible base URL', style: TextStyle(color: p.textMuted, fontSize: 12.5)),
           _Copyable(base),
+          if (host.server.mcpPort != null) ...[
+            const SizedBox(height: 8),
+            Text('MCP server (Claude Desktop, Claude Code, Cursor, VS Code)',
+                style: TextStyle(color: p.textMuted, fontSize: 12.5)),
+            _Copyable('http://${host.addresses.first}:${host.server.mcpPort}/mcp'),
+          ],
+          const SizedBox(height: 8),
+          Text('UTCP manual', style: TextStyle(color: p.textMuted, fontSize: 12.5)),
+          _Copyable('http://${host.primaryAddress}/utcp'),
+          const SizedBox(height: 8),
+          Text('A2A agent card', style: TextStyle(color: p.textMuted, fontSize: 12.5)),
+          _Copyable('http://${host.primaryAddress}/.well-known/agent-card.json'),
+          const SizedBox(height: 8),
+          Text('All of these need an access key, sent as "Authorization: Bearer <key>".',
+              style: TextStyle(color: p.textMuted, fontSize: 12.5)),
         ],
         const SizedBox(height: 8),
         Align(

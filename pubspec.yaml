@@ -57,6 +57,7 @@ dependencies:
   bonsoir: ^7.1.6
   flutter_foreground_task: ^11.0.3
   intl: ^0.20.3
+  mcp_dart: ^2.4.3
 dev_dependencies:
   flutter_test:
     sdk: flutter
