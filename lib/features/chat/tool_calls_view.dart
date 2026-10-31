@@ -32,7 +32,7 @@ class ToolCallsView extends StatelessWidget {
               call: c,
               result: results[c.id],
               running: running && results[c.id] == null,
-              source: state.tools.configFor(c.name)?.name,
+              source: state.tools.sourceNameFor(c.name),
             ),
         ],
       ),

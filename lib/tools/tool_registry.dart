@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../core/storage.dart';
 import '../data/models.dart';
 import 'a2a_source.dart';
+import 'builtin_source.dart';
 import 'cli_runner.dart';
 import 'cli_source.dart';
 import 'mcp_source.dart';
@@ -22,9 +23,18 @@ class SourceStatus {
 
 /// All tool sources the user added, and the tools they currently offer.
 class ToolRegistry extends ChangeNotifier {
-  ToolRegistry(this.storage, {this.sourceFactory});
+  ToolRegistry(this.storage, {this.sourceFactory, BuiltinToolSource? builtin})
+      : builtin = builtin ?? BuiltinToolSource(storage);
 
   final Storage storage;
+
+  /// Web search, calculator, notes… always available, no setup.
+  final BuiltinToolSource builtin;
+
+  /// Built-in tools the user switched off.
+  final Set<String> disabledBuiltins = {};
+
+  static const builtinId = 'builtin';
 
   /// Overrides how sources are built (tests).
   final ToolSource Function(ToolSourceConfig config, String? secret)? sourceFactory;
@@ -49,6 +59,16 @@ class ToolRegistry extends ChangeNotifier {
             ToolSourceConfig.fromJson(Map<String, dynamic>.from(e as Map)),
       ]);
     enabled = storage.getSetting('tools.enabled') != 'false';
+    final off = storage.getSetting('tools.builtinOff');
+    disabledBuiltins
+      ..clear()
+      ..addAll(off == null ? const [] : (jsonDecode(off) as List).cast<String>());
+    notifyListeners();
+  }
+
+  Future<void> setBuiltinEnabled(String tool, bool v) async {
+    v ? disabledBuiltins.remove(tool) : disabledBuiltins.add(tool);
+    await storage.setSetting('tools.builtinOff', jsonEncode(disabledBuiltins.toList()));
     notifyListeners();
   }
 
@@ -164,7 +184,21 @@ class ToolRegistry extends ChangeNotifier {
   List<ToolSpec> activeTools() {
     _routes.clear();
     if (!enabled) return const [];
-    final out = <ToolSpec>[];
+    final out = <ToolSpec>[
+      for (final t in builtin.tools)
+        if (!disabledBuiltins.contains(t.name))
+          ToolSpec(
+            name: 'phone_${t.name}',
+            description: t.description,
+            inputSchema: t.inputSchema,
+            sourceId: builtinId,
+            sourceLabel: 'Built-in',
+            needsApproval: t.alwaysAsk,
+          ),
+    ];
+    for (final t in out) {
+      _routes[t.name] = (builtinId, t.name.substring(6));
+    }
     for (final c in configs) {
       if (!c.enabled || !_live.containsKey(c.id)) continue;
       for (final t in status[c.id]?.tools ?? const <SourceTool>[]) {
@@ -188,6 +222,14 @@ class ToolRegistry extends ChangeNotifier {
     return out;
   }
 
+  /// Name of the source a tool comes from, for display.
+  String? sourceNameFor(String toolName) {
+    final route = _routes[toolName];
+    if (route == null) return null;
+    if (route.$1 == builtinId) return 'Built-in';
+    return configFor(toolName)?.name;
+  }
+
   ToolSourceConfig? configFor(String toolName) {
     final route = _routes[toolName];
     return route == null ? null : configs.where((c) => c.id == route.$1).firstOrNull;
@@ -207,6 +249,14 @@ class ToolRegistry extends ChangeNotifier {
 
   Future<ToolResult> execute(ToolCall call) async {
     final route = _routes[call.name];
+    if (route?.$1 == builtinId) {
+      try {
+        final out = await builtin.call(route!.$2, call.arguments).timeout(const Duration(minutes: 1));
+        return ToolResult(callId: call.id, name: call.name, text: out.text, isError: out.isError);
+      } catch (e) {
+        return ToolResult(callId: call.id, name: call.name, text: 'Tool failed: ${_friendly(e)}', isError: true);
+      }
+    }
     final source = route == null ? null : _live[route.$1];
     if (source == null) {
       return ToolResult(callId: call.id, name: call.name, text: 'Unknown tool "${call.name}"', isError: true);

@@ -34,7 +34,10 @@ class ScriptedProvider extends LlmProvider {
     } else {
       yield const ChatDelta(text: 'Let me check. ');
       yield ChatDelta(toolCalls: [
-        ToolCall(id: 'c1', name: request.tools.first.name, arguments: {'text': 'hi'}),
+        ToolCall(
+            id: 'c1',
+            name: request.tools.firstWhere((t) => t.sourceId != ToolRegistry.builtinId).name,
+            arguments: {'text': 'hi'}),
       ]);
     }
   }
@@ -108,7 +111,7 @@ void main() {
       expect(msgs[1].toolCalls.single.name, 'demo_echo');
       expect(msgs[2].toolResults.single.text, 'ECHO hi');
       expect(msgs[3].text, 'Tool said: ECHO hi');
-      expect(llm.requests.first.tools.single.sourceLabel, 'MCP server · Demo');
+      expect(llm.requests.first.tools.where((t) => t.sourceLabel == 'MCP server · Demo'), hasLength(1));
       // Saved and reloaded with the tool turn intact.
       final saved = state.storage.loadConversations().single.messages;
       expect(saved[1].toolCalls.single.arguments, {'text': 'hi'});
@@ -326,7 +329,7 @@ void main() {
       final c = ToolSourceConfig(id: 'm', type: ToolSourceType.mcp, name: 'Phone', url: 'http://127.0.0.1:${host.mcpPort}/mcp');
       await registry.addOrUpdate(c, secret: 'cbh_wrong');
       expect(registry.status['m']!.error, isNotNull);
-      expect(registry.activeTools(), isEmpty);
+      expect(registry.activeTools().where((t) => t.sourceId != ToolRegistry.builtinId), isEmpty);
     });
   });
 

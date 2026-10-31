@@ -16,6 +16,28 @@ IconData _iconFor(ToolSourceType t) => switch (t) {
       ToolSourceType.cli => Icons.terminal_rounded,
     };
 
+String _builtinTitle(String name) => switch (name) {
+      'web_search' => 'Web search',
+      'read_web_page' => 'Read web pages',
+      'calculator' => 'Calculator',
+      'date_time' => 'Date & time',
+      'device_info' => 'Device info',
+      'save_note' => 'Save notes',
+      'list_notes' => 'List notes',
+      'read_note' => 'Read notes',
+      'delete_note' => 'Delete notes',
+      _ => name,
+    };
+
+IconData _builtinIcon(String name) => switch (name) {
+      'web_search' => Icons.travel_explore_rounded,
+      'read_web_page' => Icons.article_outlined,
+      'calculator' => Icons.calculate_outlined,
+      'date_time' => Icons.schedule_rounded,
+      'device_info' => Icons.battery_std_rounded,
+      _ => Icons.sticky_note_2_outlined,
+    };
+
 /// Settings → Tools: everything the AI may use while answering.
 class ToolsScreen extends StatelessWidget {
   const ToolsScreen({super.key});
@@ -34,9 +56,10 @@ class ToolsScreen extends StatelessWidget {
           body: PageBody(children: [
             const NoteBox(
               icon: Icons.build_outlined,
-              text: 'Tools let the AI do things while it answers: search, read files, call '
-                  'apps or other AI agents. Add MCP servers, UTCP manuals, A2A agents, and on '
-                  'a PC, command-line programs. You can see every tool call in the chat.',
+              text: 'Tools let the AI do things while it answers: search the web, calculate, '
+                  'take notes, call apps or other AI agents, and run programs. Add MCP servers, '
+                  'UTCP manuals, A2A agents and command-line programs. Every tool call shows '
+                  'in the chat.',
             ),
             const SizedBox(height: 16),
             CardBox(children: [
@@ -46,6 +69,18 @@ class ToolsScreen extends StatelessWidget {
                 title: const Text('Let the AI use tools', style: TextStyle(fontWeight: FontWeight.w600)),
                 subtitle: Text('${reg.activeTools().length} tools available'),
               ),
+            ]),
+            const SectionTitle('Built-in'),
+            CardBox(children: [
+              for (final t in reg.builtin.tools)
+                SwitchListTile(
+                  value: !reg.disabledBuiltins.contains(t.name),
+                  onChanged: reg.enabled ? (v) => reg.setBuiltinEnabled(t.name, v) : null,
+                  secondary: Icon(_builtinIcon(t.name)),
+                  title: Text(_builtinTitle(t.name)),
+                  subtitle: Text(t.alwaysAsk ? '${t.description} Asks first.' : t.description,
+                      maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.textMuted)),
+                ),
             ]),
             if (reg.configs.isNotEmpty) ...[
               const SectionTitle('Your tools'),

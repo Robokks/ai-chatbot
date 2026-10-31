@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Command-line tools on Android run inside the Termux app. -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
     <application
         android:label="Chatbot"
         android:allowBackup="false"
@@ -48,6 +50,8 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Results of commands run in Termux. -->
+        <receiver android:name=".TermuxResultReceiver" android:exported="false" />
         <!-- Foreground service for "Share this device" (flutter_foreground_task). -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
@@ -64,6 +68,8 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- Termux, for command-line tools. -->
+        <package android:name="com.termux" />
         <!-- Opening links (provider key pages, links in replies). -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
