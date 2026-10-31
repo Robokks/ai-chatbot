@@ -98,6 +98,8 @@ class ComposerState extends State<Composer> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Row(
+            // Tiles size to their content instead of filling the sheet.
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (hasCamera) _AttachOption(icon: Icons.photo_camera_outlined, label: 'Camera', value: 'camera'),
               _AttachOption(icon: Icons.photo_library_outlined, label: 'Photos', value: 'photos'),
@@ -267,6 +269,7 @@ class _AttachOption extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 18),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(icon, size: 26),
                 const SizedBox(height: 8),
