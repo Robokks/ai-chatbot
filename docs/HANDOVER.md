@@ -1,7 +1,7 @@
 # Handover: Chatbot app (Flutter, Android + Windows)
 
 Last updated: 2026-10-31. Repo `Robokks/ai-chatbot`, branch **`ccr-85a70df3-vqfuzv`** (no `main`
-yet; the repo is public). Latest commit at handover: `fd17bb2`.
+yet; the repo is public). Latest commit at handover: `3530e64` (download-progress fix; its CI build was running at handover).
 
 ## Paste this into the new chat
 
@@ -107,7 +107,7 @@ Other open items the user mentioned earlier (not started):
 ## 3. Build, run, test
 
 - **Flutter 3.47.9** (Dart 3.13). Material is the separate package `material_ui`: **import `package:material_ui/material_ui.dart`, not `package:flutter/material.dart`**, because newer packages use material_ui types.
-- `flutter pub get`, `flutter analyze` (must say "No issues"), and `flutter test` (88 tests at handover, all passing).
+- `flutter pub get`, `flutter analyze` (must say "No issues"), and `flutter test` (89 tests at handover, all passing).
 - UI preview without a phone: `flutter build web --dart-define=DEMO=true --no-web-resources-cdn`, then serve `build/web` and take Playwright screenshots. Widget screenshots are also done in throwaway tests that load the fonts from `assets/google_fonts` (see past commits).
 - **CI**: `.github/workflows/build.yml` runs analyze, test, `flutter build apk --release --split-per-abi --target-platform android-arm64,android-x64`, `flutter build windows`, then publishes the **`latest`** pre-release with `Chatbot-android.apk` (arm64), `Chatbot-android-x86_64.apk` and `Chatbot-windows-x64.zip`. Download page: https://github.com/Robokks/ai-chatbot/releases/tag/latest
 - `.github/workflows/model-check.yml` checks the built-in model links and prints their SHA-256 values.
@@ -143,6 +143,11 @@ Other open items the user mentioned earlier (not started):
 - PC CLI from the phone: approve on **both** devices (the user's choice).
 
 ## 6. Gotchas
+
+- Model downloads (`background_downloader`) must set `updates: Updates.statusAndProgress`. The
+  default sends no progress, which left the bar stuck at 0% (fixed in `3530e64`; downloads started
+  before that fix finish fine but show no percentage). The screen also shows speed and time left
+  (`speedText` in `model_downloader.dart`).
 
 - `battery_plus` conflicts with `bonsoir` (dbus versions), so battery is read through the native `chatbot/device` channel instead.
 - `desktop_drop` must stay at ^0.7 (cross_file conflict with file_picker 13).
