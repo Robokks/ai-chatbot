@@ -67,6 +67,17 @@ class GeminiProvider extends LlmProvider {
     await for (final ev in parseSse(res.stream)) {
       if (ev.data.isEmpty) continue;
       final Map<String, dynamic> j = jsonDecode(ev.data);
+      final u = j['usageMetadata'] as Map?;
+      if (u != null) {
+        yield ChatDelta(
+          usage: UsageStats(
+            inputTokens: u['promptTokenCount'] as int?,
+            outputTokens: (u['candidatesTokenCount'] as int? ?? 0) +
+                (u['thoughtsTokenCount'] as int? ?? 0),
+            cachedTokens: u['cachedContentTokenCount'] as int?,
+          ),
+        );
+      }
       final candidates = j['candidates'] as List?;
       if (candidates == null || candidates.isEmpty) continue;
       final c = candidates.first as Map<String, dynamic>;

@@ -80,6 +80,20 @@ void main() {
       expect(sent.headers['anthropic-beta'], 'server-side-fallback-2026-07-01');
     });
 
+    test('reports token usage from message_start and message_delta', () async {
+      final client = MockClient.streaming((_, _) async => _sse(
+          'data: {"type":"message_start","message":{"usage":{"input_tokens":120,"cache_read_input_tokens":30,"output_tokens":1}}}\n\n'
+          'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}\n\n'
+          'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":42}}\n\n'));
+      final usage = UsageStats();
+      await for (final d in make(client).streamChat(_req('claude-opus-5-5'))) {
+        if (d.usage != null) usage.merge(d.usage!);
+      }
+      expect(usage.inputTokens, 150);
+      expect(usage.cachedTokens, 30);
+      expect(usage.outputTokens, 42);
+    });
+
     test('surfaces API errors with a hint', () async {
       final client = MockClient.streaming((_, _) async => _sse(
           '{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}',
@@ -114,6 +128,25 @@ void main() {
       expect(user['content'], contains('PDF TEXT'));
       expect(user['content'], contains('notes'));
       expect(user['content'], contains('Look at these'));
+    });
+
+    test('asks for usage only where supported and reads it', () async {
+      expect(make(ProviderKind.openai).buildBody(_req('gpt-5'))['stream_options'],
+          {'include_usage': true});
+      expect(make(ProviderKind.custom).buildBody(_req('llama3'))['stream_options'], isNull);
+      expect(make(ProviderKind.groq).buildBody(_req('llama'))['stream_options'], isNull);
+
+      final client = MockClient.streaming((_, _) async => _sse(
+          'data: {"choices":[{"delta":{"content":"Yo"}}]}\n\n'
+          'data: {"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":3,"prompt_tokens_details":{"cached_tokens":4}}}\n\n'
+          'data: [DONE]\n\n'));
+      final usage = UsageStats();
+      await for (final d in make(ProviderKind.openai, client).streamChat(_req('gpt-5'))) {
+        if (d.usage != null) usage.merge(d.usage!);
+      }
+      expect(usage.inputTokens, 11);
+      expect(usage.outputTokens, 3);
+      expect(usage.cachedTokens, 4);
     });
 
     test('streams content and reasoning_content', () async {

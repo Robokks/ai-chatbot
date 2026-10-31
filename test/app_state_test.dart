@@ -38,7 +38,11 @@ void main() {
     modelsDir = await Directory('${dir.path}/models').create();
     state = AppState(storage, localModels: LocalModelStore(storage, dir: modelsDir),
         providerFactory: (s, k) {
-      return fake = FakeProvider(s, const [ChatDelta(text: 'Hello '), ChatDelta(text: 'there')]);
+      return fake = FakeProvider(s, [
+        const ChatDelta(text: 'Hello '),
+        const ChatDelta(text: 'there'),
+        ChatDelta(usage: UsageStats(inputTokens: 12, outputTokens: 2)),
+      ]);
     });
     await state.load();
   });
@@ -66,8 +70,16 @@ void main() {
     expect(state.isStreaming, isFalse);
     expect(fake.last!.messages, hasLength(1));
 
+    final reply = c.messages.last;
+    expect(reply.provider, ProviderKind.anthropic);
+    expect(reply.usage!.inputTokens, 12);
+    expect(reply.usage!.outputTokens, 2);
+    expect(reply.usage!.firstTokenMs, isNotNull);
+    expect(reply.usage!.durationMs, isNotNull);
+
     final reloaded = storage.loadConversations();
     expect(reloaded.single.messages.last.text, 'Hello there');
+    expect(reloaded.single.messages.last.usage!.outputTokens, 2);
     expect(await storage.readKey(ProviderKind.anthropic), 'sk-test');
   });
 
@@ -93,6 +105,18 @@ void main() {
     await state.editAndResend(state.current!.messages.first, 'uno');
     final msgs = state.current!.messages;
     expect(msgs.map((m) => m.text), ['uno', 'Hello there']);
+  });
+
+  test('delete all chats empties history and storage', () async {
+    await state.setKey(ProviderKind.anthropic, 'sk-test');
+    await state.send('one', []);
+    state.newChat();
+    await state.send('two', []);
+    expect(state.conversations, hasLength(2));
+    await state.deleteAllChats();
+    expect(state.conversations, isEmpty);
+    expect(state.current, isNull);
+    expect(storage.loadConversations(), isEmpty);
   });
 
   test('delete removes the conversation', () async {

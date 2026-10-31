@@ -123,6 +123,16 @@ class LocalProvider extends LlmProvider {
               )
               .listen(
             (chunk) {
+              final u = chunk.usage;
+              if (u != null) {
+                out.add(ChatDelta(
+                  usage: UsageStats(
+                    inputTokens: u.promptTokens,
+                    outputTokens: u.completionTokens,
+                    cachedTokens: u.cachedPromptTokens,
+                  ),
+                ));
+              }
               if (chunk.choices.isEmpty) return;
               final d = chunk.choices.first.delta;
               final text = d.content ?? '';

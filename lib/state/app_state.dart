@@ -59,6 +59,9 @@ class AppState extends ChangeNotifier {
   /// Shown beside the typing indicator, e.g. "Loading model…".
   String? streamingStatus;
 
+  /// Times the reply being streamed.
+  Stopwatch? _clock;
+
   Future<void> load() async {
     for (final k in ProviderKind.values) {
       providers[k] = storage.providerSettings(k);
@@ -178,6 +181,18 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Removes every conversation and its attachments.
+  Future<void> deleteAllChats() async {
+    if (isStreaming) stop();
+    current = null;
+    for (final c in List.of(conversations)) {
+      await storage.deleteConversation(c);
+    }
+    conversations.clear();
+    await storage.compactChats();
+    notifyListeners();
+  }
+
   Future<void> delete(Conversation c) async {
     if (current == c) newChat();
     conversations.remove(c);
@@ -224,7 +239,9 @@ class AppState extends ChangeNotifier {
 
   Future<void> _reply(Conversation c) async {
     final history = List.of(c.messages);
-    final reply = Message(role: Role.assistant, model: model);
+    final reply = Message(
+        role: Role.assistant, model: model, provider: provider, usage: UsageStats());
+    _clock = Stopwatch()..start();
     c.messages.add(reply);
     c.updatedAt = DateTime.now();
     _bumpToTop(c);
@@ -251,6 +268,11 @@ class AppState extends ChangeNotifier {
           (d) {
             streamingStatus =
                 d.text.isEmpty && d.reasoning.isEmpty ? d.status ?? streamingStatus : null;
+            if (d.usage != null) reply.usage!.merge(d.usage!);
+            if ((d.text.isNotEmpty || d.reasoning.isNotEmpty) &&
+                reply.usage!.firstTokenMs == null) {
+              reply.usage!.firstTokenMs = _clock?.elapsedMilliseconds;
+            }
             reply.text += d.text;
             reply.reasoning += d.reasoning;
             if (d.notice != null) reply.error = d.notice;
@@ -270,6 +292,11 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _finish(Conversation c) async {
+    final reply = streamingMessage;
+    if (reply?.usage != null && _clock != null && reply!.usage!.firstTokenMs != null) {
+      reply.usage!.durationMs = _clock!.elapsedMilliseconds;
+    }
+    _clock = null;
     _sub = null;
     _done = null;
     streamingMessage = null;

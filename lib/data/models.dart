@@ -48,6 +48,59 @@ class Attachment {
       );
 }
 
+/// Token counts and timing for one assistant reply.
+class UsageStats {
+  UsageStats({
+    this.inputTokens,
+    this.outputTokens,
+    this.cachedTokens,
+    this.firstTokenMs,
+    this.durationMs,
+  });
+
+  int? inputTokens;
+  int? outputTokens;
+
+  /// Prompt tokens served from the provider's cache (cheaper), if reported.
+  int? cachedTokens;
+
+  /// Time from sending to the first streamed word.
+  int? firstTokenMs;
+
+  /// Time from sending to the end of the reply.
+  int? durationMs;
+
+  /// Output speed while generating, excluding the wait for the first word.
+  double? get tokensPerSecond {
+    final out = outputTokens, total = durationMs, first = firstTokenMs ?? 0;
+    if (out == null || out == 0 || total == null || total - first <= 0) return null;
+    return out / ((total - first) / 1000);
+  }
+
+  /// Copies non-null token counts from [other] (providers report in parts).
+  void merge(UsageStats other) {
+    inputTokens = other.inputTokens ?? inputTokens;
+    outputTokens = other.outputTokens ?? outputTokens;
+    cachedTokens = other.cachedTokens ?? cachedTokens;
+  }
+
+  Map<String, dynamic> toJson() => {
+        if (inputTokens != null) 'in': inputTokens,
+        if (outputTokens != null) 'out': outputTokens,
+        if (cachedTokens != null) 'cached': cachedTokens,
+        if (firstTokenMs != null) 'firstMs': firstTokenMs,
+        if (durationMs != null) 'ms': durationMs,
+      };
+
+  factory UsageStats.fromJson(Map<String, dynamic> j) => UsageStats(
+        inputTokens: j['in'] as int?,
+        outputTokens: j['out'] as int?,
+        cachedTokens: j['cached'] as int?,
+        firstTokenMs: j['firstMs'] as int?,
+        durationMs: j['ms'] as int?,
+      );
+}
+
 enum Role { user, assistant }
 
 class Message {
@@ -59,6 +112,8 @@ class Message {
     List<Attachment>? attachments,
     this.error,
     this.model,
+    this.provider,
+    this.usage,
     DateTime? createdAt,
   })  : id = id ?? newId(),
         attachments = attachments ?? [],
@@ -71,6 +126,10 @@ class Message {
   final List<Attachment> attachments;
   String? error;
   String? model;
+
+  /// Provider that wrote this reply (for usage totals and pricing).
+  ProviderKind? provider;
+  UsageStats? usage;
   final DateTime createdAt;
 
   Map<String, dynamic> toJson() => {
@@ -82,6 +141,8 @@ class Message {
           'attachments': attachments.map((a) => a.toJson()).toList(),
         if (error != null) 'error': error,
         if (model != null) 'model': model,
+        if (provider != null) 'provider': provider!.name,
+        if (usage != null) 'usage': usage!.toJson(),
         'createdAt': createdAt.toIso8601String(),
       };
 
@@ -95,6 +156,10 @@ class Message {
             .toList(),
         error: j['error'] as String?,
         model: j['model'] as String?,
+        provider: ProviderKind.values.asNameMap()[j['provider']],
+        usage: j['usage'] == null
+            ? null
+            : UsageStats.fromJson(Map<String, dynamic>.from(j['usage'] as Map)),
         createdAt: DateTime.parse(j['createdAt'] as String),
       );
 }

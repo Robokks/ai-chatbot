@@ -1,5 +1,7 @@
 import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hive_ce_flutter/hive_ce_flutter.dart';
@@ -92,6 +94,23 @@ class Storage {
     final ids = [for (final m in c.messages) ...m.attachments.map((a) => a.id)];
     await _blobs.deleteAll(ids);
     await _conversations.delete(c.id);
+  }
+
+  /// Bytes on disk used by chats and their attachments.
+  Future<int> chatDataBytes() async {
+    if (kIsWeb) return 0;
+    var total = 0;
+    for (final box in [_conversations, _blobs]) {
+      final path = box.path;
+      if (path != null && await File(path).exists()) total += await File(path).length();
+    }
+    return total;
+  }
+
+  /// Rewrites the chat files so space from deleted chats is released.
+  Future<void> compactChats() async {
+    await _conversations.compact();
+    await _blobs.compact();
   }
 
   /// Loads attachment bytes for [c] (kept out of the JSON for size).

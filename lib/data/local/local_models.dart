@@ -313,6 +313,21 @@ class LocalModelStore extends ChangeNotifier {
 
   Future<void> cancel(String id) => _downloader.cancel(id);
 
+  /// Bytes used by downloaded and partial model files.
+  Future<int> bytesOnDisk() async {
+    var total = 0;
+    await for (final f in (await _modelsDir()).list()) {
+      if (f is File) total += await f.length();
+    }
+    return total;
+  }
+
+  /// Size of an installed model file, or null.
+  Future<int?> installedBytes(String id) async {
+    final f = File(await pathFor(id));
+    return await f.exists() ? f.length() : null;
+  }
+
   /// Throws away a stopped download's partial data.
   Future<void> discardPartial(String id) async {
     await _downloader.discard(id, '${await pathFor(id)}.part');

@@ -1,15 +1,28 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../core/device_stats.dart';
 import '../../core/theme.dart';
+import '../../core/usage.dart';
 import '../../data/llm/local_provider.dart';
 import '../../data/local/local_models.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
 
 /// Download, import and remove GGUF models that run offline on this device.
-class LocalModelsScreen extends StatelessWidget {
-  const LocalModelsScreen({super.key});
+class LocalModelsScreen extends StatefulWidget {
+  const LocalModelsScreen({super.key, this.deviceStats});
+
+  /// Overrides the device lookup (tests, screenshots).
+  final DeviceStats? deviceStats;
+
+  @override
+  State<LocalModelsScreen> createState() => _LocalModelsScreenState();
+}
+
+class _LocalModelsScreenState extends State<LocalModelsScreen> {
+  late final Future<DeviceStats> _device =
+      widget.deviceStats != null ? Future.value(widget.deviceStats) : readDeviceStats();
 
   @override
   Widget build(BuildContext context) {
@@ -61,9 +74,15 @@ class LocalModelsScreen extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
+                    FutureBuilder<DeviceStats>(
+                      future: _device,
+                      builder: (context, snap) => _DeviceSummary(stats: snap.data),
+                    ),
+                    const SizedBox(height: 12),
                     for (final m in store.all)
                       _ModelCard(
+                        device: _device,
                         info: m,
                         installed: store.installed.contains(m.id),
                         progress: store.progress[m.id],
@@ -171,6 +190,7 @@ String _megabytes(int mb) =>
 
 class _ModelCard extends StatelessWidget {
   const _ModelCard({
+    required this.device,
     required this.info,
     required this.installed,
     required this.progress,
@@ -180,6 +200,7 @@ class _ModelCard extends StatelessWidget {
     required this.custom,
   });
 
+  final Future<DeviceStats> device;
   final LocalModelInfo info;
   final bool installed;
   final double? progress;
@@ -236,6 +257,14 @@ class _ModelCard extends StatelessWidget {
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(details,
                             style: TextStyle(color: p.textMuted, fontSize: 12.5)),
+                      ),
+                    if (!installed)
+                      FutureBuilder<DeviceStats>(
+                        future: device,
+                        builder: (context, snap) => snap.hasData
+                            ? _FitChip(
+                                fit: modelFit(snap.data!, ramGb: info.ramGb, sizeMb: info.sizeMb))
+                            : const SizedBox.shrink(),
                       ),
                     if (info.note.isNotEmpty)
                       Padding(
@@ -352,5 +381,66 @@ class _ModelCard extends StatelessWidget {
     if (ok != true) return;
     await LocalEngineHost.instance.release(await store.pathFor(info.id));
     await store.delete(info.id);
+  }
+}
+
+/// "This phone: 8 GB RAM (3.1 GB free) · 54 GB storage free".
+class _DeviceSummary extends StatelessWidget {
+  const _DeviceSummary({required this.stats});
+
+  final DeviceStats? stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    final s = stats;
+    final parts = <String>[
+      if (s?.totalRamMb != null)
+        '${formatBytes(s!.totalRamMb! << 20)} RAM'
+            '${s.freeRamMb != null ? ' (${formatBytes(s.freeRamMb! << 20)} free)' : ''}',
+      if (s?.freeDiskBytes != null) '${formatBytes(s!.freeDiskBytes!)} storage free',
+    ];
+    if (parts.isEmpty) return const SizedBox.shrink();
+    return Row(
+      children: [
+        Icon(Icons.smartphone_rounded, size: 18, color: p.textMuted),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text('This device: ${parts.join(' · ')}',
+              style: TextStyle(color: p.textMuted, fontSize: 13)),
+        ),
+      ],
+    );
+  }
+}
+
+class _FitChip extends StatelessWidget {
+  const _FitChip({required this.fit});
+
+  final ModelFit fit;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color, icon) = switch (fit) {
+      ModelFit.fits => ('Fits this device', const Color(0xFF2E9E5B), Icons.check_rounded),
+      ModelFit.tight => ('May be slow on this device', const Color(0xFFB7791F), Icons.speed_rounded),
+      ModelFit.tooBig => ('Too big for this device', Theme.of(context).colorScheme.error,
+          Icons.block_rounded),
+      ModelFit.noSpace => ('Not enough storage', Theme.of(context).colorScheme.error,
+          Icons.sd_card_alert_outlined),
+      ModelFit.unknown => ('', Colors.transparent, Icons.check_rounded),
+    };
+    if (fit == ModelFit.unknown) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 4),
+          Text(label, style: TextStyle(color: color, fontSize: 12.5, fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
   }
 }

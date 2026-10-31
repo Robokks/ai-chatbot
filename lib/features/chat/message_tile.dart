@@ -7,6 +7,7 @@ import '../../state/app_state.dart';
 import 'attachment_chip.dart';
 import 'markdown_view.dart';
 import 'model_picker.dart';
+import 'usage_sheet.dart';
 
 class MessageTile extends StatelessWidget {
   const MessageTile({
@@ -194,11 +195,19 @@ class _AssistantMessage extends StatelessWidget {
                     ),
                   const SizedBox(width: 8),
                   if (message.model != null)
-                    Text(
-                      AppScope.read(context).localModels.byId(message.model!)?.name ??
-                          prettyModel(message.model!),
-                      style: TextStyle(color: p.textMuted, fontSize: 12),
+                    Flexible(
+                      child: Text(
+                        AppScope.read(context).localModels.byId(message.model!)?.name ??
+                            prettyModel(message.model!),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: p.textMuted, fontSize: 12),
+                      ),
                     ),
+                  if (UsageSummary.textFor(message) != null) ...[
+                    Text('  ·  ', style: TextStyle(color: p.textMuted, fontSize: 12)),
+                    Flexible(flex: 2, child: UsageSummary(message: message)),
+                  ],
                 ],
               ),
             ),

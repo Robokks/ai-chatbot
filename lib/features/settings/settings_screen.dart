@@ -6,6 +6,7 @@ import '../../data/models.dart';
 import '../../state/app_state.dart';
 import '../chat/model_picker.dart';
 import 'local_models_screen.dart';
+import 'usage_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -79,6 +80,21 @@ class SettingsScreen extends StatelessWidget {
               'Keys are stored encrypted on this device and sent only to the provider you chat with.',
               style: TextStyle(color: p.textMuted, fontSize: 12.5),
             ),
+          ),
+          const _SectionTitle('Usage'),
+          _Card(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.insights_outlined),
+                title: const Text('Usage & storage'),
+                subtitle: Text('Device memory, storage and AI usage',
+                    style: TextStyle(color: p.textMuted)),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => const UsageScreen(),
+                )),
+              ),
+            ],
           ),
           const _SectionTitle('Appearance'),
           _Card(

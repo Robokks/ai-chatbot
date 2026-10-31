@@ -10,7 +10,13 @@ import 'openai_provider.dart';
 
 /// A piece of streamed output.
 class ChatDelta {
-  const ChatDelta({this.text = '', this.reasoning = '', this.notice, this.status});
+  const ChatDelta({
+    this.text = '',
+    this.reasoning = '',
+    this.notice,
+    this.status,
+    this.usage,
+  });
   final String text;
   final String reasoning;
 
@@ -19,6 +25,9 @@ class ChatDelta {
 
   /// Transient progress shown while waiting for output (e.g. loading a model).
   final String? status;
+
+  /// Token counts reported by the provider (often only on the last event).
+  final UsageStats? usage;
 }
 
 class ChatRequest {

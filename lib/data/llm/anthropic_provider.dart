@@ -101,6 +101,19 @@ class AnthropicProvider extends LlmProvider {
       if (ev.data.isEmpty) continue;
       final Map<String, dynamic> j = jsonDecode(ev.data);
       switch (j['type']) {
+        case 'message_start':
+          final u = (j['message'] as Map?)?['usage'] as Map?;
+          if (u != null) {
+            yield ChatDelta(
+              usage: UsageStats(
+                inputTokens: (u['input_tokens'] as int? ?? 0) +
+                    (u['cache_creation_input_tokens'] as int? ?? 0) +
+                    (u['cache_read_input_tokens'] as int? ?? 0),
+                cachedTokens: u['cache_read_input_tokens'] as int?,
+                outputTokens: u['output_tokens'] as int?,
+              ),
+            );
+          }
         case 'content_block_delta':
           final d = j['delta'] as Map<String, dynamic>;
           if (d['type'] == 'text_delta') {
@@ -109,6 +122,8 @@ class AnthropicProvider extends LlmProvider {
             yield ChatDelta(reasoning: d['thinking'] as String);
           }
         case 'message_delta':
+          final out = (j['usage'] as Map?)?['output_tokens'] as int?;
+          if (out != null) yield ChatDelta(usage: UsageStats(outputTokens: out));
           final stop = (j['delta'] as Map?)?['stop_reason'];
           if (stop == 'refusal') {
             yield const ChatDelta(

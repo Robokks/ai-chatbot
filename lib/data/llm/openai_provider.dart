@@ -11,6 +11,12 @@ import 'sse.dart';
 class OpenAiProvider extends LlmProvider {
   OpenAiProvider({required super.settings, required super.apiKey, super.client});
 
+  bool get _reportsUsage => const {
+        ProviderKind.openai,
+        ProviderKind.deepseek,
+        ProviderKind.openrouter,
+      }.contains(kind);
+
   Map<String, String> get _headers => {
         if (apiKey.isNotEmpty) 'authorization': 'Bearer $apiKey',
         'content-type': 'application/json',
@@ -65,7 +71,14 @@ class OpenAiProvider extends LlmProvider {
         ],
       });
     }
-    return {'model': req.model, 'stream': true, 'messages': messages};
+    return {
+      'model': req.model,
+      'stream': true,
+      'messages': messages,
+      // Ask for token counts in the final event. Custom servers and Groq may
+      // reject unknown options, so only send it where it is supported.
+      if (_reportsUsage) 'stream_options': {'include_usage': true},
+    };
   }
 
   @override
@@ -81,6 +94,17 @@ class OpenAiProvider extends LlmProvider {
       if (j['error'] != null) {
         throw LlmException(
             (j['error'] as Map)['message']?.toString() ?? 'Stream error');
+      }
+      final u = j['usage'] as Map?;
+      if (u != null) {
+        yield ChatDelta(
+          usage: UsageStats(
+            inputTokens: u['prompt_tokens'] as int?,
+            outputTokens: u['completion_tokens'] as int?,
+            cachedTokens: ((u['prompt_tokens_details'] as Map?)?['cached_tokens'] ??
+                u['prompt_cache_hit_tokens']) as int?,
+          ),
+        );
       }
       final choices = j['choices'] as List?;
       if (choices == null || choices.isEmpty) continue;
