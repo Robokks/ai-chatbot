@@ -73,8 +73,13 @@ class HostServer extends ChangeNotifier {
     required this.loadDevices,
     required this.saveDevices,
     this.advertise,
+    this.agents,
     Random? random,
   }) : _random = random ?? Random.secure();
+
+  /// Coding agents shared over MCP (PC hosts only).
+  final AgentHost? agents;
+  String _lastMcpDevice = 'A paired device';
 
   final HostBackend backend;
   final Future<List<PairedDevice>> Function() loadDevices;
@@ -139,7 +144,16 @@ class HostServer extends ChangeNotifier {
         hostName: () => backend.deviceName,
         models: backend.sharedModels,
         run: runPrompt,
-        authorize: (req) => authenticate(req) != null,
+        authorize: (req) {
+          final d = authenticate(req);
+          if (d != null) {
+            d.lastSeen = DateTime.now();
+            _lastMcpDevice = d.name;
+          }
+          return d != null;
+        },
+        agents: agents,
+        device: () => _lastMcpDevice,
       );
       try {
         await m.start(port == 0 ? 0 : port + 1);
@@ -450,6 +464,9 @@ class HostServer extends ChangeNotifier {
       _logEntry(device, id, status, writer.usage.outputTokens);
     }
   }
+
+  /// Adds a line to the host's recent requests list.
+  void logEvent(String device, String what, String status) => _logEntry(device, what, status, null);
 
   void _logEntry(String device, String model, String status, int? tokens) {
     log.insert(0, HostLogEntry(device, model, status, outputTokens: tokens));

@@ -36,6 +36,11 @@ class McpToolSource extends ToolSource {
           name: t.name,
           description: t.description ?? t.title ?? t.name,
           inputSchema: t.inputSchema.toJson(),
+          // Tools that may change things (e.g. a coding agent on the host)
+          // always ask first.
+          alwaysAsk: t.annotations != null &&
+              !t.annotations!.readOnlyHint &&
+              t.annotations!.destructiveHint,
         ));
       }
       cursor = page.nextCursor;
@@ -46,7 +51,18 @@ class McpToolSource extends ToolSource {
   @override
   Future<ToolOutput> call(String tool, Map<String, dynamic> arguments) async {
     final client = await _connect();
-    final result = await client.callTool(CallToolRequest(name: tool, arguments: arguments));
+    final result = await client.callTool(
+      CallToolRequest(name: tool, arguments: arguments),
+      options: RequestOptions(
+        // Long jobs (coding agents) send progress, which keeps the call alive.
+        timeout: const Duration(minutes: 2),
+        resetTimeoutOnProgress: true,
+        maxTotalTimeout: const Duration(minutes: 25),
+        onprogress: (p) {
+          if (p.message != null) onProgress?.call(p.message!);
+        },
+      ),
+    );
     final parts = <String>[
       for (final c in result.content)
         switch (c) {
@@ -60,6 +76,9 @@ class McpToolSource extends ToolSource {
     ];
     return ToolOutput(clip(parts.join("\n")), isError: result.isError);
   }
+
+  @override
+  Duration get callTimeout => const Duration(minutes: 26);
 
   @override
   Future<void> close() async {

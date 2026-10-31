@@ -249,7 +249,7 @@ class ToolRegistry extends ChangeNotifier {
     return prettyJson(call.arguments);
   }
 
-  Future<ToolResult> execute(ToolCall call) async {
+  Future<ToolResult> execute(ToolCall call, {void Function(String message)? onProgress}) async {
     final route = _routes[call.name];
     if (route?.$1 == builtinId) {
       try {
@@ -263,13 +263,16 @@ class ToolRegistry extends ChangeNotifier {
     if (source == null) {
       return ToolResult(callId: call.id, name: call.name, text: 'Unknown tool "${call.name}"', isError: true);
     }
+    source.onProgress = onProgress;
     try {
-      final out = await source.call(route!.$2, call.arguments).timeout(const Duration(minutes: 3));
+      final out = await source.call(route!.$2, call.arguments).timeout(source.callTimeout);
       return ToolResult(callId: call.id, name: call.name, text: out.text, isError: out.isError);
     } on TimeoutException {
       return ToolResult(callId: call.id, name: call.name, text: 'The tool timed out.', isError: true);
     } catch (e) {
       return ToolResult(callId: call.id, name: call.name, text: 'Tool failed: ${_friendly(e)}', isError: true);
+    } finally {
+      source.onProgress = null;
     }
   }
 

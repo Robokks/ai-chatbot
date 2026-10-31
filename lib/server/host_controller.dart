@@ -7,6 +7,8 @@ import '../core/device_stats.dart';
 import '../data/llm/llm_provider.dart';
 import '../data/models.dart';
 import '../state/app_state.dart';
+import '../tools/cli_runner.dart';
+import 'agent_hub.dart';
 import 'discovery.dart';
 import 'foreground.dart';
 import 'host_server.dart';
@@ -15,17 +17,28 @@ import 'openai_bridge.dart';
 /// Host mode: shares this device's models with the user's other devices.
 class HostController extends ChangeNotifier implements HostBackend {
   HostController(this.app) {
+    agents = AgentHub(
+      load: () => app.storage.getSetting('host.agents'),
+      save: (v) => app.storage.setSetting('host.agents', v),
+      log: (device, what, status) => server.logEvent(device, what, status),
+    )..addListener(notifyListeners);
     server = HostServer(
       this,
       loadDevices: _loadDevices,
       saveDevices: _saveDevices,
       advertise: advertiseHost,
+      agents: agentsSupported ? agents : null,
     )..addListener(notifyListeners);
     _load();
+    if (agentsSupported) agents.refresh();
   }
 
   final AppState app;
   late final HostServer server;
+
+  /// Claude Code / Codex sharing (PC only).
+  late final AgentHub agents;
+  static bool get agentsSupported => desktopCli;
 
   /// The web build can't open a server socket.
   static bool get supported => !kIsWeb;
@@ -135,6 +148,7 @@ class HostController extends ChangeNotifier implements HostBackend {
   }
 
   Future<void> stop() async {
+    agents.denyAll();
     await server.stop();
     await HostForegroundService.stop();
     notifyListeners();
@@ -143,6 +157,7 @@ class HostController extends ChangeNotifier implements HostBackend {
   @override
   void dispose() {
     server.removeListener(notifyListeners);
+    agents.removeListener(notifyListeners);
     super.dispose();
   }
 }

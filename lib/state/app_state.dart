@@ -342,7 +342,10 @@ class AppState extends ChangeNotifier {
         }
         streamingStatus = 'Running ${spec?.sourceLabel ?? call.name}…';
         notifyListeners();
-        results.add(await tools.execute(call));
+        results.add(await tools.execute(call, onProgress: (m) {
+          streamingStatus = m;
+          notifyListeners();
+        }));
       }
       // Every call needs a result, even when the user pressed stop.
       for (final call in reply.toolCalls.skip(results.length)) {

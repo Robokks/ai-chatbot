@@ -1,15 +1,16 @@
 # Handover: Chatbot app (Flutter, Android + Windows)
 
-Last updated: 2026-10-31. Repo `Robokks/ai-chatbot`, branch **`ccr-85a70df3-vqfuzv`** (no `main`
-yet; the repo is public). Latest commit at handover: `3530e64` (download-progress fix; its CI build was running at handover).
+Last updated: 2026-10-31 (second handover). Repo `Robokks/ai-chatbot`, branch **`ccr-85a70df3-vqfuzv`**
+(there's no `main` yet; the repo is public). Last commit with a CI build: `399e547`. The commit after it, **"WIP: Claude
+Code / Codex sharing"**, used `[skip ci]` and is **untested** (see §2A).
 
 ## Paste this into the new chat
 
 > Continue the Flutter chatbot app in GitHub repo `Robokks/ai-chatbot`, branch
 > `ccr-85a70df3-vqfuzv`. Read `docs/HANDOVER.md` first. It describes the project, the
-> decisions made, and the unfinished work (section "In progress / next steps"). Work on the same
-> branch and push there. Keep `flutter analyze` clean and all tests passing. The GitHub Actions
-> "Build" workflow publishes the APK and Windows zip to the `latest` release.
+> decisions made, and the unfinished work (section 2). Start with §2A: run the new
+> tests and fix them, then push so CI builds. Then ask me which item in §2B/§2C to do next.
+> Work on the same branch and push there. Keep `flutter analyze` clean and all tests passing.
 
 ---
 
@@ -59,55 +60,86 @@ Features done:
   - model-id path-traversal fix;
   - Android backup disabled;
   - CI actions pinned to SHAs with read-only permissions;
-  - optional release signing from secrets;
+  - release signing with the user's **permanent key** (done; see §2D);
   - model checksums.
 
-## 2. In progress / next steps (approved plan, "Tools that work on the phone")
+## 2. In progress / next steps
 
-The user approved three parts:
+### 2A. Claude Code / Codex from the offline PC: CODE WRITTEN, TESTS NOT RUN YET (do this first)
 
-1. **Built-in phone tools**: DONE (`lib/tools/builtin_source.dart`, wired into `tool_registry.dart` and `tools_screen.dart`).
-2. **CLI on Android via Termux**: mostly done.
-   - Done:
-     - Kotlin: `MainActivity.kt` has channels `chatbot/termux` (`isInstalled`, `hasPermission`, `requestPermission`, `run`) and `chatbot/device` (`battery`). `TermuxResultReceiver.kt` receives results from Termux `RunCommandService` through a mutable PendingIntent.
-     - Manifest: `com.termux.permission.RUN_COMMAND`, `<queries><package com.termux>`, the receiver.
-     - Dart: `lib/tools/termux.dart` (`TermuxRunner`, `ChannelTermuxRunner`, `termuxOutput`).
-     - `cli_runner.dart`: `cliSupported` = desktop, or Android with `TermuxRunner.ready`.
-     - `cli_source.dart` and the UTCP `_callCli` use Termux on Android.
-     - `ToolRegistry.load()` calls `TermuxRunner.refresh()`.
-   - TODO:
-     - **Setup guide UI.** In `lib/features/tools/tools_screen.dart`, `SourceScreen`, when `type == cli` on Android, show 4 steps, each with a ✓ from `TermuxRunner.instance.isInstalled()` / `hasPermission()`:
-       1. Install Termux from F-Droid (open `https://f-droid.org/packages/com.termux/`).
-       2. Copy the command `echo "allow-external-apps=true" >> ~/.termux/termux.properties && termux-reload-settings`.
-       3. A **Grant permission** button (`requestPermission()`, then `TermuxRunner.refresh()`).
-       4. Install programs with `pkg install git python`.
-     - In `ToolsScreen`, show "Add CLI program" on Android even before Termux is ready (`TermuxRunner.isAndroid`). Fix the note text: CLI is available on Windows, and on Android via Termux.
-     - **Tests** (`test/termux_test.dart`) with a fake `TermuxRunner`: success; non-zero exit; `err` != 0 with an `allow-external-apps` hint; not installed; no permission. Also `termuxOutput` formatting.
-     - The Kotlin code has **not compiled yet**. CI is the first compile, so check the Android job log after pushing.
-3. **The PC's CLI programs shared to the phone, approved on BOTH devices**: NOT STARTED.
-   - Host setting **"Share CLI programs with paired devices"**: off by default, stored in `host.settings` (`host_controller.dart`), shown in `host_screen.dart` only when `desktopCli`.
-   - `host_mcp.dart`: when enabled, register `run_<slug>` for each enabled CLI config in `app.tools.configs`, with input `{args: string[], cwd?: string}` and `annotations: ToolAnnotations(destructiveHint: true)`.
-     - The callback first awaits a **host approval**: add `Future<bool> Function(String device, String command)? approveRun` to `HostServer`/`HostMcpServer`. `HostController` exposes `pendingRemoteRun` (device, command, a Completer) and auto-denies after 2 minutes.
-     - Then it runs `runProcess` and logs to `server.log`.
-     - The MCP callback has no device identity; use the bearer key → `server.authenticate` on the request if mcp_dart exposes it, otherwise label it "Paired device".
-   - Host UI: an approval banner in `features/home/home_shell.dart` (visible anywhere in the app) and on `host_screen.dart`, with Allow/Deny and the command in monospace.
-   - Phone side: in `lib/tools/mcp_source.dart` `discover()`, set `alwaysAsk: t.annotations?.destructiveHint == true`. This applies to all MCP servers. The phone already has one-tap "Tools from <host>" (`tools_screen.dart` `_addHostTools`).
-   - Tests: shared only when the setting is on; host approve/deny/timeout; phone marks destructive tools as always-ask. Model them on the real-host tests in `test/tools_test.dart`.
-4. After each part: run `flutter analyze` and `flutter test`, commit with the attribution trailer (see §7), push, watch the CI "Build" run, and update the README "Tools" section.
+**Need:** the user has 2 Windows PCs on one LAN. Only one has internet, and Claude Code and Codex are installed there only. From the offline PC they want to use Claude Code and Codex through this app. The plan was approved; it's in the old plan file and summarized here.
 
-Other open items the user mentioned earlier (not started):
-- **Play Store publishing.** A plan exists, waiting for the user's go-ahead.
-  - App id already `com.robokks.chatbot`.
-  - Needs a privacy policy on GitHub Pages and a store kit (icon, feature graphic, screenshots, listing text, data-safety answers).
-  - Generative-AI policy needs an in-app "Report" action on AI replies.
-  - Contact email for the policy not confirmed (asked whether to show karthi96pmk@gmail.com).
-  - New personal Play accounts need a closed test with 12 testers for 14 days.
-- **Permanent signing key.** The workflow supports it; the user must add secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS` (steps in the README). Until then every CI build has a new debug key, so the user must uninstall before updating.
+**Design:** the internet PC runs the home server. It offers MCP tools `claude_code` and `codex`. The offline PC adds them with Tools → "Tools from <host>" (that already exists). Each run asks on the offline PC first (destructive tool), then shows **Allow / Allow for 30 min / Deny** on the internet PC. No answer in 2 minutes means deny.
+
+New files:
+- `lib/server/coding_agents.dart`:
+  - `CodingAgent` enum: program `claude` or `codex`, MCP tool names, install hints.
+  - `AgentFolder` and `AgentSettings`, saved in setting `host.agents`.
+  - `agentArgs()`: **fixed words only. The task goes in through stdin and the folder is the working directory**, so prompt text can't become shell code. This matters because Windows runs the npm `.cmd` shims through cmd.exe with `runInShell`.
+    - Claude Code: `claude -p --output-format text --permission-mode plan|acceptEdits [--continue]`.
+    - Codex: `codex exec --skip-git-repo-check --sandbox read-only|workspace-write`, with the prompt from stdin. Codex has no continue, because the `exec resume` syntax wasn't verified.
+  - `detectAgent()` runs `--version`.
+  - `runAgent()`: `Process.start`, progress ticks, 20-minute kill, `clip()`.
+  - `HostApproval`.
+- `lib/server/agent_hub.dart`: `AgentHub` (ChangeNotifier, implements `AgentHost`). It holds settings, detection (`versions`), the `pending` approvals queue, `answer()`, `allowAllUntil` ("Allow for 30 min" trusts **all** runs, not just one device), `denyAll()`, and `runAgentTask()`, which logs to the host log through `server.logEvent`.
+- `lib/features/host/agents_card.dart`:
+  - `AgentsCard`, on the host screen in section "Coding agents", PC only: agent switches with version or install hint; a folder list with Add (`FilePicker.getDirectoryPath`) and Read only / Can edit.
+  - `AgentApprovalOverlay`: in `MaterialApp.builder` in `lib/app.dart`, so the box shows over every screen.
+- `test/coding_agents_test.dart`: **written, never run.** It uses `sh` fake agents and a real host plus `ToolRegistry`, like `test/tools_test.dart`, and imports `HostBackendFake` from it.
+
+Changed files:
+- `host_mcp.dart`: the `AgentHost` interface; `_registerAgents` registers tools only when an agent is enabled, detected, and at least one folder exists. Input is `{task, folder (enum of labels), continue_last}`, with `ToolAnnotations(destructiveHint: true)`. It sends `extra.sendProgress` every 15 seconds.
+- `host_server.dart`: optional `agents`; the MCP authorizer records the last device name (`_lastMcpDevice`) because mcp_dart gives tool callbacks no request or auth info, so device names are best effort; `logEvent()`.
+- `host_controller.dart`: creates `agents` (AgentHub). `agentsSupported = desktopCli`. `stop()` denies anything pending.
+- Client side:
+  - `mcp_source.dart`: tools with annotations that are destructive and not read-only become `alwaysAsk`. `callTool` uses `RequestOptions(timeout: 2m, resetTimeoutOnProgress: true, maxTotalTimeout: 25m, onprogress → onProgress)`. `callTimeout` is 26 minutes.
+  - `tool_source.dart`: added `onProgress` and `callTimeout`.
+  - `tool_registry.dart`: `execute(call, {onProgress})`, with a per-source timeout.
+  - `app_state.dart`: progress text goes to `streamingStatus`.
+
+`flutter analyze` was clean before the interruption. TODO:
+1. `export PATH=/opt/flutter/bin:$PATH` (in the cloud container), then `flutter test test/coding_agents_test.dart` and fix any failures. Possible weak spots:
+   - the stateless MCP 2026-07-28 protocol and progress notifications (if `sendProgress` gets no progressToken, progress silently does nothing; then check that the client sends one);
+   - `JsonSchema.boolean`/`enumValues` serialisation;
+   - the `alwaysAsk` mapping.
+2. Run all tests (89 before, plus about 9 new), push **without** `[skip ci]`, and check the Windows job builds.
+3. README: a "Use Claude Code / Codex from another PC" section with simple steps:
+   1. Internet PC: Share this device → Coding agents → switch on, add folder.
+   2. Offline PC: pair → Tools → "Tools from <PC>".
+   3. Chat: "ask Claude Code to …" → approve on both PCs.
+4. Tell the user the steps above in simple words.
+
+### 2B. NEW REQUEST (not planned yet): image generator, OCR for PDFs, voice cloner, on device
+
+The user wrote: "Integrate Image generator & ocr pdf voice cloner. All open source model, less space consumption model." They want plan mode first. Research so far: the `llamadart` 0.17 package the app already uses (see its README in the pub cache) supports all three.
+- **Image generation**: `ImageGenerationEngine` (stable-diffusion.cpp). Preview; Android arm64 CPU and Windows x64 are supported. It needs the runtime enabled: in `pubspec.yaml` `hooks: user_defines: llamadart: llamadart_native_runtimes: [llama_cpp, stable_diffusion]` (today it's limited to llama_cpp CPU; check the existing user_defines). That adds about 40–70 MB per target to the APK. It was validated with **SDXS** (very small, 512px, fast) and **SD-Turbo**, so SDXS is the small model to offer. Check licenses.
+- **OCR**: a small vision GGUF plus its mmproj projector through llamadart multimodal, e.g. Liquid AI **LFM2-VL-450M** (the user likes LFM) or SmolVLM-256M. Scanned PDFs need pages turned into images first; `pdfrx` is one option, but check its size. The app already pulls text from PDFs that have a text layer.
+- **Voice cloning**: llamadart has experimental `TextToSpeechEngine` with `Qwen3TtsAdapter`. Native code shows a `SPEAKER_REFERENCE` capability, so cloning from a short reference clip may work with Qwen3-TTS 0.6B Base; **check this in `lib/src/core/speech/text_to_speech.dart`**. Also add audio recording and playback packages. Safety: add a consent note, e.g. "Only clone your own voice or a voice you have permission to use", and label output as AI-generated.
+- Other ideas: run the heavy ones on the PC host and share them over the home server (the user likes that pattern), and show "Fits this device" checks (`modelFit`).
+- Next step: enter plan mode, ask the user which to do first and whether they're phone-only or the PC host too, then write the plan.
+
+### 2C. Older open items
+- **Termux setup guide UI and tests**: not done. The Kotlin bridge, manifest, `lib/tools/termux.dart` and the CLI wiring are done, and they compiled in CI.
+  - In `tools_screen.dart` `SourceScreen` (type cli, Android), show 4 steps, each with a ✓ from `TermuxRunner.instance.isInstalled()` / `hasPermission()`:
+    1. Install Termux from F-Droid.
+    2. `echo "allow-external-apps=true" >> ~/.termux/termux.properties && termux-reload-settings`.
+    3. **Grant permission** button.
+    4. `pkg install git python`.
+  - Show "Add CLI program" on Android before Termux is ready.
+  - `test/termux_test.dart` with a fake runner.
+- **Sharing any PC CLI program to the phone, approved on both devices**: not started. Reuse the 2A approval system: `AgentHub`'s pending queue and the overlay.
+- **Bigger offline models (paused by the user)**: in `git stash` `"bigger models (paused by user)"`. That stash is in the old container only and is **lost** in a new one, so redo it from this note: add Gemma 3 4B (`unsloth/gemma-3-4b-it-GGUF`, `gemma-3-4b-it-Q4_K_M.gguf`, about 2400 MB, needs 5 GB RAM) and Qwen 2.5 3B (`Qwen/Qwen2.5-3B-Instruct-GGUF`, `qwen2.5-3b-instruct-q4_k_m.gguf`, about 2000 MB, needs 4 GB RAM) to `builtInLocalModels`. Let `model-check.yml` print the SHA-256 values, then pin them. Only do this when the user says so.
+- **Play Store publishing**: a plan exists, on hold. App id `com.robokks.chatbot`. It needs a privacy policy page, a store kit, an in-app "Report" button for AI replies, and a closed test (12 testers, 14 days).
+
+### 2D. Done since the last handover
+- **Permanent signing key** is set up. The user made it with `colab/make_signing_key.ipynb` (a Drive copy exists; the backup is in `MyDrive/Chatbot/signing-key/`) and added the secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS`. CI run 41220707817 signed with it, and that run's APK is in the `latest` release. Told the user to uninstall the old app **one last time**; from now on updates install over it and keep their data. **Never change the key**, or the user loses data again.
+- Download progress fix (`3530e64`).
+- Answered: an offline PC can use AI through the internet PC by running the home server on the internet PC and pairing the offline PC (already works).
 
 ## 3. Build, run, test
 
 - **Flutter 3.47.9** (Dart 3.13). Material is the separate package `material_ui`: **import `package:material_ui/material_ui.dart`, not `package:flutter/material.dart`**, because newer packages use material_ui types.
-- `flutter pub get`, `flutter analyze` (must say "No issues"), and `flutter test` (89 tests at handover, all passing).
+- `flutter pub get`, `flutter analyze` (must say "No issues"), and `flutter test` (89 tests passing at `399e547`; plus `test/coding_agents_test.dart`, not run yet).
 - UI preview without a phone: `flutter build web --dart-define=DEMO=true --no-web-resources-cdn`, then serve `build/web` and take Playwright screenshots. Widget screenshots are also done in throwaway tests that load the fonts from `assets/google_fonts` (see past commits).
 - **CI**: `.github/workflows/build.yml` runs analyze, test, `flutter build apk --release --split-per-abi --target-platform android-arm64,android-x64`, `flutter build windows`, then publishes the **`latest`** pre-release with `Chatbot-android.apk` (arm64), `Chatbot-android-x86_64.apk` and `Chatbot-windows-x64.zip`. Download page: https://github.com/Robokks/ai-chatbot/releases/tag/latest
 - `.github/workflows/model-check.yml` checks the built-in model links and prints their SHA-256 values.
@@ -153,7 +185,8 @@ Other open items the user mentioned earlier (not started):
 - `desktop_drop` must stay at ^0.7 (cross_file conflict with file_picker 13).
 - `llamadart` user_defines in `pubspec.yaml` limit Android to the CPU llama.cpp runtime (smaller APK). Android needs `minSdk 29`, 64-bit only.
 - Android `network_security_config.xml` allows cleartext, for LAN home servers.
-- The MCP server runs on its own port (`StreamableMcpServer`), main port + 1.
+- The MCP server runs on its own port (`StreamableMcpServer`), main port + 1. Tool callbacks get no HTTP request or auth info (`RequestHandlerExtra.requestInfo`/`authInfo` are never filled), so the device name comes from the last authorized request.
+- In the cloud container Flutter is at `/opt/flutter/bin` (it's not on PATH).
 - Claude tool loops need the signed thinking blocks replayed unchanged (`Message.providerBlocks`). Through the home server they travel as `x_provider_blocks`.
 - The web build has no llama.cpp, no server and no CLI. It's for demos and screenshots only.
 

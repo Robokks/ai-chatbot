@@ -4,11 +4,31 @@ import 'dart:io';
 import 'package:mcp_dart/mcp_dart.dart';
 
 import '../data/models.dart';
+import '../tools/tool_source.dart';
+import 'coding_agents.dart';
 import 'openai_bridge.dart';
 
 /// Runs one prompt on a shared model and returns the full answer.
 typedef RunPrompt = Future<(String text, String model)> Function(
     String? model, String prompt, String? system);
+
+/// Runs coding agents (Claude Code, Codex) for paired devices, after the
+/// host user approves each run.
+abstract class AgentHost {
+  AgentSettings get agentSettings;
+
+  /// Agents switched on and found on this PC.
+  Set<CodingAgent> get availableAgents;
+
+  Future<ToolOutput> runAgentTask(
+    CodingAgent agent,
+    AgentFolder folder,
+    String task, {
+    required String device,
+    bool continueLast = false,
+    void Function(Duration elapsed, String lastLine)? onProgress,
+  });
+}
 
 /// MCP server (Streamable HTTP) exposing the host's models as tools, for
 /// Claude Desktop, Claude Code, Cursor, VS Code and other MCP clients.
@@ -18,12 +38,19 @@ class HostMcpServer {
     required this.models,
     required this.run,
     required this.authorize,
+    this.agents,
+    this.device,
   });
 
   final String Function() hostName;
   final List<SharedModel> Function() models;
   final RunPrompt run;
   final bool Function(HttpRequest request) authorize;
+  final AgentHost? agents;
+
+  /// Name of the device whose request was last let in; used to label agent
+  /// runs in the host's approval box.
+  final String Function()? device;
   StreamableMcpServer? _server;
 
   int? get port => _server?.boundPort;
@@ -78,7 +105,76 @@ class HostMcpServer {
         }
       },
     );
+    _registerAgents(server);
     return server;
+  }
+
+  void _registerAgents(McpServer server) {
+    final host = agents;
+    if (host == null) return;
+    final deviceName = device?.call() ?? 'A paired device';
+    final settings = host.agentSettings;
+    if (settings.folders.isEmpty) return;
+    for (final agent in host.availableAgents) {
+      final folders = [
+        for (final f in settings.folders) '"${f.label}" (${f.canEdit ? 'can edit files' : 'read only'})',
+      ].join(', ');
+      server.registerTool(
+        agent.toolName,
+        description: 'Give a coding task to ${agent.fullName}, running on ${hostName()} in one of '
+            'its project folders: $folders. It reads the code, can run checks and, in '
+            'folders that allow it, edit files, then answers with what it found or did. '
+            'Describe the task fully; it cannot see this chat. The user on '
+            '${hostName()} approves each run. Runs can take several minutes.',
+        inputSchema: JsonSchema.object(
+          properties: {
+            'task': JsonSchema.string(description: 'The full task or question for the agent'),
+            'folder': JsonSchema.string(
+              description: 'Project folder label',
+              enumValues: [for (final f in settings.folders) f.label],
+            ),
+            if (agent.canContinue)
+              'continue_last': JsonSchema.boolean(
+                  description: 'Continue the previous ${agent.label} conversation in this folder'),
+          },
+          required: ['task', 'folder'],
+        ),
+        annotations: ToolAnnotations(title: agent.label, destructiveHint: true),
+        callback: (args, extra) async {
+          final folder = host.agentSettings.folder('${args['folder']}');
+          final task = '${args['task'] ?? ''}'.trim();
+          if (folder == null) {
+            return CallToolResult(
+                content: [TextContent(text: 'Unknown folder "${args['folder']}". Use one of: $folders')],
+                isError: true);
+          }
+          if (task.isEmpty) {
+            return CallToolResult(content: [const TextContent(text: '"task" is required')], isError: true);
+          }
+          if (!host.availableAgents.contains(agent)) {
+            return CallToolResult(
+                content: [TextContent(text: '${agent.label} is not shared by ${hostName()} any more.')],
+                isError: true);
+          }
+          final out = await host.runAgentTask(
+            agent,
+            folder,
+            task,
+            device: deviceName,
+            continueLast: args['continue_last'] == true,
+            onProgress: (elapsed, line) {
+              final m = elapsed.inMinutes, sec = elapsed.inSeconds % 60;
+              extra
+                  .sendProgress(elapsed.inSeconds.toDouble(),
+                      message: '${agent.label} is working… ${m > 0 ? '${m}m ' : ''}${sec}s'
+                          '${line.isEmpty ? '' : ' · ${line.length > 80 ? '${line.substring(0, 80)}…' : line}'}')
+                  .catchError((_) {});
+            },
+          );
+          return CallToolResult(content: [TextContent(text: out.text)], isError: out.isError);
+        },
+      );
+    }
   }
 
   Future<void> start(int port) async {

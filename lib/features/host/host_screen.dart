@@ -8,6 +8,7 @@ import '../../server/host_controller.dart';
 import '../../server/host_server.dart';
 import '../../state/app_state.dart';
 import '../chat/model_picker.dart';
+import 'agents_card.dart';
 import 'widgets.dart';
 
 /// "Share this device": run the local server for the user's other devices.
@@ -56,6 +57,10 @@ class HostScreen extends StatelessWidget {
             ],
             const SectionTitle('Shared models'),
             _SharedModels(host: host, state: state),
+            if (HostController.agentsSupported) ...[
+              const SectionTitle('Coding agents'),
+              AgentsCard(hub: host.agents),
+            ],
             if (running) ...[
               const SectionTitle('For other apps'),
               _OtherApps(host: host),

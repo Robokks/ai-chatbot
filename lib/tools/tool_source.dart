@@ -102,6 +102,12 @@ abstract class ToolSource {
 
   Future<ToolOutput> call(String tool, Map<String, dynamic> arguments);
 
+  /// Progress text from a long-running call, set while a call runs.
+  void Function(String message)? onProgress;
+
+  /// How long a call may take before the app gives up.
+  Duration get callTimeout => const Duration(minutes: 3);
+
   Future<void> close() async {}
 }
 
