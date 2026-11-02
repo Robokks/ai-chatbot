@@ -100,6 +100,8 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist
+      - name: Build date
+        run: echo "BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_ENV"
       - name: Rename files
         run: |
           mv dist/chatbot-android-apk/app-arm64-v8a-release.apk Chatbot-android.apk
@@ -108,7 +110,7 @@ jobs:
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
-          name: ${{ startsWith(github.ref, 'refs/tags/v') && format('Chatbot {0}', github.ref_name) || 'Chatbot (latest build)' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && format('Chatbot {0}', github.ref_name) || format('Chatbot (latest build #{0})', github.run_number) }}
           prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
           make_latest: ${{ startsWith(github.ref, 'refs/tags/v') }}
           target_commitish: ${{ github.sha }}
@@ -117,15 +119,18 @@ jobs:
             Chatbot-android-x86_64.apk
             Chatbot-windows-x64.zip
           body: |
-            Built from ${{ github.sha }}.
+            **Build #${{ github.run_number }}**, made on ${{ env.BUILD_DATE }} from commit
+            ${{ github.sha }}. The app files below are replaced by every new build, so this
+            page always has the newest version (check the build number and date above).
 
             **Android:** download `Chatbot-android.apk` on your phone and open it. Allow
-            "Install unknown apps" for your browser when asked. (`Chatbot-android-x86_64.apk`
-            is only for emulators and Intel Chromebooks.)
+            "Install unknown apps" for your browser when asked. It installs over the old app
+            and keeps your chats. (`Chatbot-android-x86_64.apk` is only for emulators and
+            Intel Chromebooks.)
 
             **Windows:** download `Chatbot-windows-x64.zip`, unzip it, and run
             `ai_chatbot.exe` inside the folder (keep the other files next to it). If
             SmartScreen warns, choose **More info → Run anyway**.
 
-            Then open **Settings → API keys** in the app and add your Claude / ChatGPT /
-            DeepSeek key.
+            Then tap **Get free AI** in the app: it walks you through free Groq and Gemini
+            keys in about 2 minutes.
