@@ -5,6 +5,7 @@ import '../../data/models.dart';
 import '../../state/app_state.dart';
 import '../host/connect_screen.dart';
 import '../settings/free_auto_screen.dart';
+import '../setup/setup_wizard.dart';
 import '../settings/local_models_screen.dart';
 import '../settings/settings_screen.dart';
 
@@ -115,6 +116,18 @@ class _ModelList extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
           child: Text('Choose a model', style: serif(context, size: 22)),
         ),
+        if (ready.isEmpty || ready.every((k) => k == ProviderKind.local))
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+            child: FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                openSetupWizard(context);
+              },
+              icon: const Icon(Icons.auto_awesome_rounded),
+              label: const Text('Get free AI in 2 minutes'),
+            ),
+          ),
         for (final k in kinds) ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 16, 8, 6),
@@ -295,6 +308,12 @@ class ProviderAvatar extends StatelessWidget {
     ProviderKind.sambanova: Color(0xFFEE7624),
     ProviderKind.zai: Color(0xFF2D5BFF),
     ProviderKind.freellmapi: Color(0xFF5B5BD6),
+    ProviderKind.chutes: Color(0xFF111111),
+    ProviderKind.together: Color(0xFF0F6FFF),
+    ProviderKind.scaleway: Color(0xFF4F0599),
+    ProviderKind.ovh: Color(0xFF123F6D),
+    ProviderKind.qwen: Color(0xFF615CED),
+    ProviderKind.deepinfra: Color(0xFF2B6CB0),
     ProviderKind.auto: Color(0xFF2E9E5B),
   };
 

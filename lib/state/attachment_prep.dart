@@ -35,8 +35,15 @@ class AttachmentPrep {
 
   static const _alwaysKey = 'reader.cloudAlways';
 
-  /// Cloud providers that can read pictures, in the order they are tried.
-  static const cloudReaders = [ProviderKind.anthropic, ProviderKind.openai, ProviderKind.gemini];
+  /// Online providers that can read pictures, in the order they are tried:
+  /// free ones first, then paid. The offline reader is the last fallback.
+  static const cloudReaders = [
+    ProviderKind.gemini,
+    ProviderKind.mistral,
+    ProviderKind.github,
+    ProviderKind.anthropic,
+    ProviderKind.openai,
+  ];
 
   /// Providers the user said "Always" for.
   Set<ProviderKind> get alwaysAllowed {
@@ -62,12 +69,13 @@ class AttachmentPrep {
     void Function(String status)? onStatus,
     bool Function()? stopped,
     Future<CloudReadChoice> Function(Attachment a, ProviderKind cloud)? ask,
+    bool? targetSees,
   }) async {
     final todo = <Attachment>[
       for (final m in history)
         if (m.role == Role.user)
           for (final a in m.attachments)
-            if (_needsReading(a, target)) a,
+            if (_needsReading(a, target, targetSees)) a,
     ];
     final declined = <ProviderKind>{};
     for (var i = 0; i < todo.length; i++) {
@@ -89,9 +97,9 @@ class AttachmentPrep {
     }
   }
 
-  bool _needsReading(Attachment a, ProviderKind target) {
+  bool _needsReading(Attachment a, ProviderKind target, bool? targetSees) {
     if (a.text != null || a.bytes == null) return false;
-    if (a.kind == AttachmentKind.image) return !target.images;
+    if (a.kind == AttachmentKind.image) return !(targetSees ?? target.images);
     if (a.kind == AttachmentKind.pdf) return !target.pdf && renderPdf != null;
     return false;
   }
@@ -128,6 +136,28 @@ class AttachmentPrep {
     Set<ProviderKind> declined, {
     bool pdfPage = false,
   }) async {
+    // Online first (the user's choice), each provider asked once unless
+    // "Always" was picked.
+    var saidNo = false;
+    for (final k in cloudReaders) {
+      if (saidNo || !app.hasKey(k) || declined.contains(k)) continue;
+      if (!alwaysAllowed.contains(k)) {
+        if (ask == null) continue;
+        final choice = await ask(a, k);
+        if (choice == CloudReadChoice.no) {
+          declined.add(k);
+          saidNo = true;
+          continue;
+        }
+        if (choice == CloudReadChoice.always) await setAlways(k, true);
+      }
+      try {
+        final text = await _readWithCloud(k, bytes);
+        return pdfPage ? text : '(Read by ${k.label})\n$text';
+      } on LlmException {
+        declined.add(k); // Limit reached or failed: try the next one.
+      }
+    }
     final m = app.localModels.installedVisionModel;
     if (m != null && AppState.localSupported) {
       final big = m.sizeMb > 1000;
@@ -139,20 +169,6 @@ class AttachmentPrep {
       );
       return pdfPage ? text : '(Read by ${m.name.replaceAll(' (picture reader)', '')} on this device)\n$text';
     }
-    for (final k in cloudReaders) {
-      if (!app.hasKey(k) || declined.contains(k)) continue;
-      if (!alwaysAllowed.contains(k)) {
-        if (ask == null) continue;
-        final choice = await ask(a, k);
-        if (choice == CloudReadChoice.no) {
-          declined.add(k);
-          throw const _NoReader();
-        }
-        if (choice == CloudReadChoice.always) await setAlways(k, true);
-      }
-      final text = await _readWithCloud(k, bytes);
-      return pdfPage ? text : '(Read by ${k.label})\n$text';
-    }
     throw const _NoReader();
   }
 
@@ -163,8 +179,11 @@ class AttachmentPrep {
         name: 'picture.jpg', mimeType: 'image/jpeg', kind: AttachmentKind.image, size: bytes.length,
         bytes: downscale(bytes, 1568));
     final out = StringBuffer();
+    // A fast model is enough to read a picture.
+    final model = settings.models.firstWhere((m) => m.contains('flash') || m.contains('mini'),
+        orElse: () => settings.models.first);
     await for (final d in llm.streamChat(ChatRequest(
-      model: settings.models.first,
+      model: model,
       messages: [Message(role: Role.user, text: pictureReadInstructions, attachments: [picture])],
     ))) {
       out.write(d.text);

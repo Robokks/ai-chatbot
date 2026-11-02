@@ -37,7 +37,11 @@ class HomeImageClient {
 
   /// Asks the host for one 512×512 picture. [job] can stop the wait.
   Future<MadeImage> generate(String baseUrl, String key, String prompt,
-      {String? model, int? seed, ImageJob? job, String? size = '512x512'}) async {
+      {String? model,
+      int? seed,
+      ImageJob? job,
+      String? size = '512x512',
+      String service = 'The home server'}) async {
     final c = _newClient();
     final watch = Stopwatch()..start();
     final cancelled = Completer<Never>();
@@ -68,7 +72,11 @@ class HomeImageClient {
       final j = jsonDecode(res.body);
       if (res.statusCode != 200) {
         final msg = j is Map ? (j['error'] is Map ? j['error']['message'] : j['error']) : null;
-        throw ImageMakerException('${msg ?? 'The home server could not make the picture '
+        if (res.statusCode == 429) {
+          throw ImageMakerException('$service: the free picture limit is used up for now. Try '
+              'another service or try again later.');
+        }
+        throw ImageMakerException('${msg ?? '$service could not make the picture '
             '(error ${res.statusCode}).'}');
       }
       final first = ((j as Map)['data'] as List).first as Map;
@@ -84,10 +92,10 @@ class HomeImageClient {
     } on ImageMakerException {
       rethrow;
     } on TimeoutException {
-      throw const ImageMakerException('The home server took too long to answer.');
+      throw ImageMakerException('$service took too long to answer.');
     } catch (e) {
       if (job?.cancelled ?? false) throw const ImageMakerException('Stopped.');
-      throw ImageMakerException('Could not reach the home server ($e).');
+      throw ImageMakerException('Could not reach ${service == 'The home server' ? 'the home server' : service} ($e).');
     } finally {
       c.close();
     }

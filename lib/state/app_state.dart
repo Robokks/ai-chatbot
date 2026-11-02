@@ -127,6 +127,18 @@ class AppState extends ChangeNotifier {
       }
     }
     _syncLocalModels();
+    _preferOnline();
+  }
+
+  /// Online first: when the chosen model can't be used (no key) and a free
+  /// provider is set up, use Free Auto.
+  void _preferOnline() {
+    if (demoMode || hasKey(provider) || !hasKey(ProviderKind.auto)) return;
+    provider = ProviderKind.auto;
+    model = 'auto';
+    unawaited(storage.setSetting('provider', provider.name));
+    unawaited(storage.setSetting('model', model));
+    notifyListeners();
   }
 
   /// Mirrors installed GGUF files into the On-device provider's model list.
@@ -137,9 +149,10 @@ class AppState extends ChangeNotifier {
     ];
     providers[ProviderKind.local] = ProviderSettings(kind: ProviderKind.local, models: ids);
     if (provider == ProviderKind.local && !ids.contains(model) && !demoMode) {
-      final fallback = ProviderKind.values.firstWhere(
-          (k) => k != ProviderKind.local && hasKey(k),
-          orElse: () => ProviderKind.anthropic);
+      final fallback = hasKey(ProviderKind.auto)
+          ? ProviderKind.auto
+          : ProviderKind.values.firstWhere((k) => k != ProviderKind.local && hasKey(k),
+              orElse: () => ProviderKind.anthropic);
       provider = fallback;
       model = providers[fallback]!.models.first;
     }
@@ -182,6 +195,9 @@ class AppState extends ChangeNotifier {
         modelsFor: (k) => providers[k]?.models ?? const [],
       );
 
+  /// Whether Free Auto has an enabled provider that can see pictures.
+  bool get autoCanSee => autoRoutes.any((r) => r.enabled && r.kind.images);
+
   Future<void> saveAutoRoutes(List<AutoRoute> routes) async {
     await storage.setSetting('auto.routes', encodeAutoRoutes(routes));
     notifyListeners();
@@ -194,6 +210,14 @@ class AppState extends ChangeNotifier {
         routes: autoRoutes,
         providerFor: (sub) => _providerFactory(providers[sub]!, keyFor(sub)),
         cooldowns: autoCooldowns,
+        // No provider that can see answered: read the pictures into text.
+        readPictures: (messages) => reader.prepare(messages, ProviderKind.auto,
+            onStatus: (s) {
+              streamingStatus = s;
+              notifyListeners();
+            },
+            stopped: () => _stopped,
+            ask: _askCloudRead),
       );
     }
     return _providerFactory(providers[k]!, key ?? keyFor(k));
@@ -215,6 +239,7 @@ class AppState extends ChangeNotifier {
     }
     await storage.writeKey(k, v);
     notifyListeners();
+    _preferOnline();
   }
 
   Future<void> updateProviderSettings(ProviderSettings s) async {
@@ -260,9 +285,11 @@ class AppState extends ChangeNotifier {
     await storage.setSetting('network.hostName', null);
     images.hostModels = const [];
     if (provider == ProviderKind.network) {
-      final fallback = ProviderKind.values.firstWhere(
-          (k) => k != ProviderKind.network && k != ProviderKind.custom && hasKey(k),
-          orElse: () => ProviderKind.anthropic);
+      final fallback = hasKey(ProviderKind.auto)
+          ? ProviderKind.auto
+          : ProviderKind.values.firstWhere(
+              (k) => k != ProviderKind.network && k != ProviderKind.custom && hasKey(k),
+              orElse: () => ProviderKind.anthropic);
       final models = providers[fallback]!.models;
       await selectModel(fallback, models.isEmpty ? '' : models.first);
     }
@@ -397,6 +424,7 @@ class AppState extends ChangeNotifier {
 
       if (round == 0 && !demoMode) {
         await reader.prepare(history, provider,
+            targetSees: provider == ProviderKind.auto ? autoCanSee : null,
             onStatus: (s) {
               streamingStatus = s;
               notifyListeners();

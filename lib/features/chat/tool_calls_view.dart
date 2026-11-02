@@ -230,6 +230,8 @@ class PictureReadCard extends StatelessWidget {
     ProviderKind.anthropic: 'Anthropic',
     ProviderKind.openai: 'OpenAI',
     ProviderKind.gemini: 'Google',
+    ProviderKind.mistral: 'Mistral AI',
+    ProviderKind.github: 'GitHub (Microsoft)',
   };
 
   @override
@@ -260,8 +262,8 @@ class PictureReadCard extends StatelessWidget {
           ]),
           const SizedBox(height: 6),
           Text(
-            '${state.provider.label} can\'t see pictures. ${cloud.label} can read "${a.name}" and '
-            'pass the text on. The ${a.kind == AttachmentKind.pdf ? 'pages are' : 'picture is'} '
+            '${state.provider.label} can\'t see pictures. ${cloud.label}${cloud.free ? ' (free)' : ''} '
+            'can read "${a.name}" and pass the text on. The ${a.kind == AttachmentKind.pdf ? 'pages are' : 'picture is'} '
             'sent to ${_company[cloud] ?? cloud.label}. To keep pictures on this device, '
             'download a picture reader in Settings → On-device models.',
             style: TextStyle(color: p.textMuted, fontSize: 13, height: 1.4),

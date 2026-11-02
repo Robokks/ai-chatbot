@@ -169,7 +169,22 @@ The user shared FreeLLMAPI (github.com/tashfeenahmed/freellmapi) and asked to "a
 - The user found SDXS pictures "very bad"; SD-Turbo (2 GB) was offered but not chosen yet.
 - No real keys were tested; ask the user to try Groq/Cerebras + Cloudflare.
 
-### 2B. Still to do from the same request: voice cloner, on device
+### 2B-4. Online first (this session; the user: "Now we focus on online later offline")
+- Defaults: `AppState._preferOnline()` picks Free Auto when the chosen model has no key (on load
+  and after `setKey`); fallbacks prefer Free Auto. Gemini's default model is now flash.
+- Free Auto + pictures: `AppState.autoCanSee`; `AttachmentPrep.prepare(targetSees:)` keeps pictures
+  for Free Auto; `AutoProvider` sends unread pictures only to `images` routes, and if none answers it
+  calls `readPictures` and retries all routes (`AutoProvider._afterReading`).
+- Reader order: online first (Gemini, Mistral, GitHub, Claude, ChatGPT; ask Yes/Always/No), offline
+  LFM2-VL last.
+- More providers: chutes, together (+ `ImageTarget.together`, FLUX.1-schnell-Free via
+  `HomeImageClient`), scaleway, ovh, qwen, deepinfra; `isFreeModel()` filter for Free Auto.
+- Setup wizard: `lib/features/setup/setup_wizard.dart` (Groq, Gemini, Cloudflare/HF), opens on first
+  start (not in tests: `FLUTTER_TEST`), from the welcome banner, Settings and the model picker;
+  setting `setup.done`.
+- Offline work is paused by the user's choice ("later offline"): SD-Turbo and the voice cloner wait.
+
+### 2B. Still to do from the same request: voice cloner, on device (later: offline is paused)
 
 The user wrote: "Integrate Image generator & ocr pdf voice cloner. All open source model, less space consumption model." They want plan mode first. Research so far: the `llamadart` 0.17 package the app already uses (see its README in the pub cache) supports all three.
 - **OCR**: a small vision GGUF plus its mmproj projector through llamadart multimodal, e.g. Liquid AI **LFM2-VL-450M** (the user likes LFM) or SmolVLM-256M. Scanned PDFs need pages turned into images first; `pdfrx` is one option, but check its size. The app already pulls text from PDFs that have a text layer.

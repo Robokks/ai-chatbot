@@ -35,19 +35,30 @@ const defaultAutoOrder = [
   ProviderKind.cohere,
   ProviderKind.sambanova,
   ProviderKind.zai,
+  ProviderKind.together,
+  ProviderKind.chutes,
+  ProviderKind.scaleway,
+  ProviderKind.ovh,
+  ProviderKind.qwen,
+  ProviderKind.deepinfra,
   ProviderKind.freellmapi,
 ];
 
-/// The model Free Auto uses for [kind] when the user hasn't picked one:
-/// for OpenRouter only a ":free" model, else the provider's first model.
+/// Providers where only some models are free: Free Auto uses just those.
+bool isFreeModel(ProviderKind kind, String model) => switch (kind) {
+      ProviderKind.openrouter => model.endsWith(':free'),
+      ProviderKind.together => model.endsWith('-Free'),
+      ProviderKind.chutes => model.endsWith(':free') || model.toLowerCase().contains('free'),
+      _ => true,
+    };
+
+/// The model Free Auto uses for [kind] when the user hasn't picked one: the
+/// first free one (see [isFreeModel]).
 String? defaultAutoModel(ProviderKind kind, List<String> models) {
-  if (kind == ProviderKind.openrouter) {
-    for (final m in models) {
-      if (m.endsWith(':free')) return m;
-    }
-    return null;
+  for (final m in models) {
+    if (isFreeModel(kind, m)) return m;
   }
-  return models.isEmpty ? null : models.first;
+  return null;
 }
 
 /// Merges saved routes with the providers that now have keys: saved order
@@ -112,7 +123,26 @@ class AutoProvider extends LlmProvider {
     required this.cooldowns,
     this.limitRest = const Duration(minutes: 15),
     this.keyRest = const Duration(hours: 1),
-  }) : super(apiKey: '');
+    this.readPictures,
+  })  : _picturesHandled = false,
+        super(apiKey: '');
+
+  AutoProvider._afterReading(AutoProvider o)
+      : routes = o.routes,
+        providerFor = o.providerFor,
+        cooldowns = o.cooldowns,
+        limitRest = o.limitRest,
+        keyRest = o.keyRest,
+        readPictures = null,
+        _picturesHandled = true,
+        super(settings: o.settings, apiKey: '');
+
+  /// The pictures were already read (or couldn't be): use every route.
+  final bool _picturesHandled;
+
+  /// Turns pictures into text (the picture reader), for when no provider
+  /// that can see is working.
+  final Future<void> Function(List<Message> messages)? readPictures;
 
   final List<AutoRoute> routes;
   final LlmProvider Function(ProviderKind) providerFor;
@@ -141,12 +171,13 @@ class AutoProvider extends LlmProvider {
       usable.sort((a, b) => cooldowns.until(a.kind)!.compareTo(cooldowns.until(b.kind)!));
       available.add(usable.first);
     }
-    if (_hasImages(request)) {
-      available.sort((a, b) => (b.kind.images ? 1 : 0) - (a.kind.images ? 1 : 0));
-    }
+    // Unread pictures go only to providers that can see them.
+    final pictures = !_picturesHandled && _hasImages(request);
+    final seeing = [for (final r in available) if (r.kind.images) r];
+    final order = pictures && (seeing.isNotEmpty || readPictures != null) ? seeing : available;
 
     final problems = <String>[];
-    for (final route in available) {
+    for (final route in order) {
       final p = providerFor(route.kind);
       var started = false;
       try {
@@ -185,7 +216,27 @@ class AutoProvider extends LlmProvider {
         }
       }
     }
+    if (pictures && !identical(order, available)) {
+      // Nobody that can see answered: read the pictures, then try everyone.
+      if (readPictures != null) {
+        yield const ChatDelta(status: 'Reading the pictures…');
+        await readPictures!(request.messages);
+      }
+      yield* AutoProvider._afterReading(this)._streamWithout(request, problems);
+      return;
+    }
     throw LlmException('All free providers failed right now. ${problems.join(' · ')}');
+  }
+
+  /// After the pictures were read: every route, reporting earlier problems
+  /// too if all fail.
+  Stream<ChatDelta> _streamWithout(ChatRequest request, List<String> earlier) async* {
+    try {
+      yield* streamChat(request);
+    } on LlmException catch (e) {
+      if (earlier.isEmpty) rethrow;
+      throw LlmException('${e.message} · ${earlier.join(' · ')}', statusCode: e.statusCode);
+    }
   }
 
   @override

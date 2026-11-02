@@ -6,6 +6,7 @@ import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
 import '../attachments/attachment_service.dart';
+import '../setup/setup_wizard.dart';
 import 'composer.dart';
 import 'message_tile.dart';
 import 'tool_calls_view.dart';
@@ -357,15 +358,15 @@ class _KeyBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.key_rounded, size: 20, color: p.textMuted),
+          Icon(Icons.auto_awesome_rounded, size: 20, color: p.textMuted),
           const SizedBox(width: 10),
-          Expanded(
-            child: Text('Add your ${provider.label} API key to start chatting.',
-                style: const TextStyle(fontSize: 14)),
+          const Expanded(
+            child: Text('Start with free AI: no credit card, about 2 minutes.',
+                style: TextStyle(fontSize: 14)),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pushNamed('/settings'),
-            child: const Text('Settings'),
+          FilledButton(
+            onPressed: () => openSetupWizard(context),
+            child: const Text('Get free AI'),
           ),
         ],
       ),

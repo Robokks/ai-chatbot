@@ -10,10 +10,14 @@ import '../data/local/local_models.dart';
 import '../data/models.dart';
 import 'app_state.dart';
 
+/// Together's free FLUX model.
+const togetherFluxModel = 'black-forest-labs/FLUX.1-schnell-Free';
+
 /// Where a picture is made.
 enum ImageTarget {
   cloudflare('Cloudflare FLUX', 'Free online · good quality'),
   huggingface('Hugging Face FLUX', 'Free online · good quality'),
+  together('Together FLUX', 'Free online · good quality'),
   freellmapi('FreeLLMAPI', 'Free online through your PC'),
   homeServer('Home server', 'Your PC on this Wi-Fi'),
   thisDevice('This device', 'Offline · small model, simple pictures');
@@ -66,6 +70,7 @@ class ImageMaker extends ChangeNotifier {
   bool _ready(ImageTarget t) => switch (t) {
         ImageTarget.cloudflare => app.hasKey(ProviderKind.cloudflare),
         ImageTarget.huggingface => app.hasKey(ProviderKind.huggingface),
+        ImageTarget.together => app.hasKey(ProviderKind.together),
         ImageTarget.freellmapi => app.hasKey(ProviderKind.freellmapi),
         ImageTarget.homeServer => hostOffers,
         ImageTarget.thisDevice => canMakeHere,
@@ -131,11 +136,16 @@ class ImageMaker extends ChangeNotifier {
         case ImageTarget.huggingface:
           _progress('Making the picture on Hugging Face…', null);
           image = await cloud.huggingFace(app.keyFor(ProviderKind.huggingface), prompt, seed: seed, job: job);
+        case ImageTarget.together:
+          _progress('Making the picture on Together…', null);
+          image = await home.generate(app.providers[ProviderKind.together]!.baseUrl,
+              app.keyFor(ProviderKind.together), prompt,
+              model: togetherFluxModel, seed: seed, job: job, size: null, service: 'Together');
         case ImageTarget.freellmapi:
           _progress('Making the picture through FreeLLMAPI…', null);
           image = await home.generate(app.providers[ProviderKind.freellmapi]!.baseUrl,
               app.keyFor(ProviderKind.freellmapi), prompt,
-              seed: seed, job: job, size: null);
+              seed: seed, job: job, size: null, service: 'FreeLLMAPI');
         case ImageTarget.homeServer:
           if (!hostOffers) throw const ImageMakerException('The home server does not share the image maker.');
           _progress('Making the picture on $hostName…', null);

@@ -89,7 +89,7 @@ class _FreeAutoScreenState extends State<FreeAutoScreen> {
                             underline: const SizedBox.shrink(),
                             items: [
                               for (final m in {r.model, ...?state.providers[r.kind]?.models})
-                                if (r.kind != ProviderKind.openrouter || m.endsWith(':free'))
+                                if (isFreeModel(r.kind, m))
                                   DropdownMenuItem(
                                     value: m,
                                     child: Text(prettyModel(m),
@@ -136,14 +136,15 @@ class _FreeAutoScreenState extends State<FreeAutoScreen> {
                   },
                 ),
             ]),
-            if (missing.contains(ProviderKind.openrouter) && state.hasKey(ProviderKind.openrouter))
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                    'OpenRouter is used only with ":free" models. Open OpenRouter, tap "Test & load '
-                    'models" and choose some ending in ":free".',
-                    style: TextStyle(color: p.textMuted, fontSize: 12.5)),
-              ),
+            for (final k in [ProviderKind.openrouter, ProviderKind.together, ProviderKind.chutes])
+              if (missing.contains(k) && state.hasKey(k))
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                      '${k.label} is used only with its free models. Open ${k.label}, tap "Test & '
+                      'load models" and choose some marked free.',
+                      style: TextStyle(color: p.textMuted, fontSize: 12.5)),
+                ),
           ],
         ],
       ),

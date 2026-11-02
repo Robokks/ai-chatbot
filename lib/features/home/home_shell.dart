@@ -1,9 +1,13 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../core/theme.dart';
 import '../../state/app_state.dart';
 import '../chat/chat_screen.dart';
+import '../setup/setup_wizard.dart';
 import '../sidebar/sidebar.dart';
 
 /// Drawer layout on phones, persistent collapsible sidebar on wide screens.
@@ -17,6 +21,18 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   bool _sidebarOpen = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // First start with nothing set up: show "Free AI in 2 minutes".
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _inTests) return;
+      if (shouldAutoOpenSetup(AppScope.read(context))) openSetupWizard(context);
+    });
+  }
+
+  static bool get _inTests => !kIsWeb && Platform.environment.containsKey('FLUTTER_TEST');
 
   static const _wideBreakpoint = 900.0;
   static const _sidebarWidth = 288.0;

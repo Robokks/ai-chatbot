@@ -9,6 +9,7 @@ import '../chat/model_picker.dart';
 import '../host/connect_screen.dart';
 import '../host/host_screen.dart';
 import '../tools/tools_screen.dart';
+import '../setup/setup_wizard.dart';
 import 'free_auto_screen.dart';
 import 'local_models_screen.dart';
 import 'usage_screen.dart';
@@ -103,6 +104,14 @@ class SettingsScreen extends StatelessWidget {
           ],
           const _SectionTitle('Free AI (no credit card)'),
           _Card(children: [
+            ListTile(
+              leading: const Icon(Icons.auto_awesome_rounded),
+              title: const Text('Set up free AI (2 minutes)'),
+              subtitle: Text('Step by step: Groq, Gemini and free pictures',
+                  style: TextStyle(color: p.textMuted)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => openSetupWizard(context),
+            ),
             for (final k in ProviderKind.values)
               if (k.free) _ProviderTile(kind: k),
           ]),

@@ -94,8 +94,15 @@ Open **Settings → On-device models** (or the model picker → On-device → Do
 
 ## Free AI providers
 
-Many AI companies have free plans with no credit card. Open **Settings → Free AI**, tap one,
-tap **Get a key**, paste the key and tap **Save**: the app checks it and loads the models.
+Many AI companies have free plans with no credit card. The easiest start is **Get free AI**
+(on the start screen, or Settings → Free AI → **Set up free AI**): it walks you through a free
+Groq key, a Gemini key (understands photos and PDFs) and optionally Cloudflare or Hugging Face
+for pictures, and checks each key. It also opens by itself on the first start.
+
+To add any other one: **Settings → Free AI**, tap it, tap **Get a key**, paste and **Save**.
+
+The app is online first: with a free key it uses **Free Auto**, photos go to a free model that
+can see (Gemini, Mistral, GitHub), and pictures are made online. Offline models stay as a backup.
 
 | Provider | What you get free | Notes |
 |---|---|---|
@@ -111,6 +118,12 @@ tap **Get a key**, paste the key and tap **Save**: the app checks it and loads t
 | Cohere | 1000 requests a month | |
 | SambaNova | Fast open models | |
 | Z.ai | GLM-4.5-Flash | |
+| Together AI | Models ending in `-Free` | Also free FLUX pictures |
+| Chutes | Some free models | Free Auto uses only those |
+| Scaleway | 1M free tokens | European servers |
+| OVHcloud | Free with a small rate limit | European servers |
+| Qwen (Alibaba) | Free quota for new accounts | |
+| DeepInfra | A small free amount | |
 | FreeLLMAPI | All of the above, pooled on your PC | Runs on your PC; set its address and key |
 
 **Free Auto** appears in the model list once you have a free key. It uses your free providers
@@ -118,7 +131,7 @@ in order (Settings → Free AI → Free Auto to change it). When one says its li
 fails before answering, it moves to the next. The reply shows which model answered. An answer is
 never mixed from two models.
 
-**Free pictures:** with a Cloudflare or Hugging Face key, **Create images** can make FLUX
+**Free pictures:** with a Cloudflare, Hugging Face or Together key, **Create images** can make FLUX
 pictures online, which look much better than the small offline model. Choose under **Make on**.
 
 Free plans change often and have limits. Use one account per company: making many accounts to
