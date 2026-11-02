@@ -5,6 +5,7 @@ import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
+import '../../state/attachment_prep.dart';
 import '../attachments/attachment_service.dart';
 import 'attachment_chip.dart';
 import 'model_picker.dart';
@@ -124,11 +125,15 @@ class ComposerState extends State<Composer> {
   }
 
   String? _warningFor(Attachment a, ProviderKind provider) {
-    if (a.kind == AttachmentKind.image && !provider.images) {
-      return '${provider.label} can\'t read images; it will be skipped.';
+    final state = AppScope.read(context);
+    final canRead = state.localModels.installedVisionModel != null ||
+        AttachmentPrep.cloudReaders.any(state.hasKey);
+    if (a.kind == AttachmentKind.image && !provider.images && !canRead) {
+      return '${provider.label} can\'t see pictures. Download a picture reader in '
+          'Settings → On-device models.';
     }
-    if (a.kind == AttachmentKind.pdf && !provider.pdf && a.text == null) {
-      return 'No text found in this PDF for ${provider.label}.';
+    if (a.kind == AttachmentKind.pdf && !provider.pdf && a.text == null && !canRead) {
+      return 'This PDF is a scan. Download a picture reader so ${provider.label} can read it.';
     }
     return null;
   }

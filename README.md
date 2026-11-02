@@ -92,6 +92,24 @@ Open **Settings → On-device models** (or the model picker → On-device → Do
 - Android needs a 64-bit phone with Android 10 or later. The model list lives in
   `lib/data/local/local_models.dart`.
 
+## Files the AI can read
+
+Attach almost any file. The AI gets what is inside it and keeps it for the rest of the chat.
+
+- **Pictures:** Claude, ChatGPT and Gemini see them directly. For models that can't see
+  (on-device models, DeepSeek, Groq), a **picture reader** first copies out the text in the
+  picture and describes it. Download one under Settings → On-device models: **LFM2-VL 450M**
+  (460 MB, fast) or **LFM2-VL 1.6B** (1.7 GB, better with small text). It works offline. If you
+  have neither, the app can use your Claude, ChatGPT or Gemini key to read the picture, but it
+  asks you first (Yes / Always / No).
+- **PDFs:** sent as they are to Claude, ChatGPT and Gemini. Other models get the text. Scanned
+  PDFs are read page by page with the picture reader (up to 8 pages on a phone, 20 on a PC).
+- **Word, Excel, PowerPoint** (.docx, .xlsx, .pptx), **OpenDocument** (.odt, .ods, .odp),
+  **RTF**, **EPUB** and **ZIP**: text, tables (sheets become tables) and slides with notes.
+  Pictures inside them are attached too. Old .doc/.xls/.ppt files: save them in the new format
+  first.
+- Text and code files, as before. On a home server, the host reads pictures for its own models.
+
 ## Create images
 
 Open the sidebar → **Create images**. The first time, tap **Download** to get the image model

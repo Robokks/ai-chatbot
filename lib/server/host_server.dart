@@ -76,8 +76,12 @@ class HostServer extends ChangeNotifier {
     this.advertise,
     this.agents,
     this.images,
+    this.prepareAttachments,
     Random? random,
   }) : _random = random ?? Random.secure();
+
+  /// Reads pictures and scanned PDFs for shared models that can't.
+  final Future<void> Function(List<Message> messages, ProviderKind target)? prepareAttachments;
 
   /// The image maker, shared at `/v1/images/...` and over MCP.
   final HostImages? images;
@@ -374,6 +378,13 @@ class HostServer extends ChangeNotifier {
     final (kind, model) = route;
     final provider = backend.providerFor(kind);
     final writer = CompletionWriter(parsed.modelId)..provider = kind;
+    // Pictures and scanned PDFs for a model that can't take them are read
+    // here, on the host (with its own picture reader).
+    try {
+      await prepareAttachments?.call(parsed.messages, kind);
+    } catch (_) {
+      // Unread pictures are described as such to the model.
+    }
     final stream = provider.streamChat(ChatRequest(
       model: model,
       messages: parsed.messages,

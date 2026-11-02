@@ -7,6 +7,7 @@ import '../../data/local/image_gallery.dart';
 import '../images/images_screen.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
+import '../../state/attachment_prep.dart';
 import '../../tools/tool_source.dart';
 
 /// The tools an assistant turn used, each expandable to its input and result.
@@ -211,6 +212,72 @@ class ToolApprovalCard extends StatelessWidget {
               TextButton(onPressed: () => state.answerApproval(false), child: const Text('Deny')),
               const SizedBox(width: 6),
               FilledButton(onPressed: () => state.answerApproval(true), child: const Text('Allow')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "This model can't see pictures. Read 'x.jpg' with Claude?"
+class PictureReadCard extends StatelessWidget {
+  const PictureReadCard({super.key, required this.request});
+
+  final PictureReadRequest request;
+
+  static const _company = {
+    ProviderKind.anthropic: 'Anthropic',
+    ProviderKind.openai: 'OpenAI',
+    ProviderKind.gemini: 'Google',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.read(context);
+    final p = Palette.of(context);
+    final accent = Theme.of(context).colorScheme.primary;
+    final a = request.attachment;
+    final cloud = request.provider;
+    final what = a.kind == AttachmentKind.pdf ? 'the scanned PDF' : 'the picture';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      decoration: BoxDecoration(
+        color: p.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: accent, width: 1.4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(children: [
+            Icon(Icons.image_search_rounded, color: accent, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('Read $what with ${cloud.label}?',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          Text(
+            '${state.provider.label} can\'t see pictures. ${cloud.label} can read "${a.name}" and '
+            'pass the text on. The ${a.kind == AttachmentKind.pdf ? 'pages are' : 'picture is'} '
+            'sent to ${_company[cloud] ?? cloud.label}. To keep pictures on this device, '
+            'download a picture reader in Settings → On-device models.',
+            style: TextStyle(color: p.textMuted, fontSize: 13, height: 1.4),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 6,
+            children: [
+              TextButton(
+                  onPressed: () => state.answerPictureRead(CloudReadChoice.no), child: const Text('No')),
+              OutlinedButton(
+                  onPressed: () => state.answerPictureRead(CloudReadChoice.always),
+                  child: const Text('Always')),
+              FilledButton(
+                  onPressed: () => state.answerPictureRead(CloudReadChoice.yes), child: const Text('Yes')),
             ],
           ),
         ],

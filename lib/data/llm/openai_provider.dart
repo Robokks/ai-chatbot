@@ -79,7 +79,7 @@ class OpenAiProvider extends LlmProvider {
           ? m.attachments
               .where((a) => a.kind == AttachmentKind.pdf && a.bytes != null)
           : const <Attachment>[];
-      final text = inlineTextAttachments(m, includePdf: !kind.pdf);
+      final text = inlineTextAttachments(m, includePdf: !kind.pdf, includeImages: !kind.images);
 
       if (images.isEmpty && pdfs.isEmpty) {
         if (text.isEmpty) continue;

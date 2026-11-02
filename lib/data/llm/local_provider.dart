@@ -42,16 +42,20 @@ class LocalEngineHost {
   final List<Future<void> Function()> _others = [];
   void addOtherModel(Future<void> Function() unload) => _others.add(unload);
 
-  Future<LlamaEngine> engineFor(String path) async {
-    if (_engine != null && _path == path) return _engine!;
-    if (_loading != null && _path == path) return _loading!;
+  /// The engine for the model at [path], loading it (with its vision
+  /// [projector], if any) when another model is loaded.
+  Future<LlamaEngine> engineFor(String path, {String? projector}) async {
+    final key = projector == null ? path : '$path+$projector';
+    if (_engine != null && _path == key) return _engine!;
+    if (_loading != null && _path == key) return _loading!;
     await unload();
     for (final other in _others) {
       await other();
     }
-    _path = path;
+    _path = key;
     final loading = _loading = LlamaEngine.load(
-      LlamaModel(ModelSource.path(path)),
+      LlamaModel(ModelSource.path(path),
+          projector: projector == null ? null : ModelSource.path(projector)),
       params: const ModelParams(contextSize: contextSize),
     );
     try {
@@ -76,7 +80,7 @@ class LocalEngineHost {
 
   /// Unloads [path] if it is the loaded model (before deleting the file).
   Future<void> release(String path) async {
-    if (_path == path) await unload();
+    if (_path == path || (_path?.startsWith('$path+') ?? false)) await unload();
   }
 }
 
@@ -107,7 +111,7 @@ class LocalProvider extends LlmProvider {
       final int size;
       switch (m.role) {
         case Role.user:
-          final text = inlineTextAttachments(m, includePdf: true);
+          final text = inlineTextAttachments(m, includePdf: true, includeImages: true, maxPerFile: 6000);
           if (text.isEmpty) continue;
           size = text.length;
           converted = [LlamaChatMessage.fromText(role: LlamaChatRole.user, text: text)];

@@ -32,6 +32,9 @@ class HostController extends ChangeNotifier implements HostBackend, HostImages {
       advertise: advertiseHost,
       agents: agentsSupported ? agents : null,
       images: this,
+      // No one may be at the host to answer the cloud question: only offline
+      // readers and clouds set to "Always" are used.
+      prepareAttachments: (messages, kind) => app.reader.prepare(messages, kind),
     )..addListener(notifyListeners);
     _load();
   }

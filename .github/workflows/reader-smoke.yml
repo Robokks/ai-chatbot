@@ -1,0 +1,43 @@
+name: Picture reader smoke test
+
+# Reads the text on one generated picture with the real LFM2-VL 450M model on
+# Linux x64, to prove the vision projector loads and our settings work.
+# Run by hand, or when the reader changes.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['ccr-*']
+    paths: ['lib/data/local/picture_reader.dart', 'lib/data/llm/local_provider.dart',
+            '.github/workflows/reader-smoke.yml', 'test/smoke/reader_smoke_test.dart']
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: 3.47.9
+  REPO: https://huggingface.co/LiquidAI/LFM2-VL-450M-GGUF/resolve/main
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Download LFM2-VL 450M
+        run: |
+          mkdir -p "$RUNNER_TEMP/models" && cd "$RUNNER_TEMP/models"
+          curl -fL --retry 4 -o model.gguf "$REPO/LFM2-VL-450M-Q8_0.gguf"
+          curl -fL --retry 4 -o mmproj.gguf "$REPO/mmproj-LFM2-VL-450M-Q8_0.gguf"
+          echo "e97704a0cf0a1d00ca604b4c672c82f4234318dba9d43a7f7a4c0d2df6747844  model.gguf" | sha256sum -c -
+          echo "a6a813fae4ba3f90852a990fdd4786a017dba0e80e599a366853ba539ee2b5ef  mmproj.gguf" | sha256sum -c -
+      - run: flutter pub get
+      - name: Read a picture
+        env:
+          READER_MODEL: ${{ runner.temp }}/models/model.gguf
+          READER_PROJECTOR: ${{ runner.temp }}/models/mmproj.gguf
+        run: flutter test test/smoke/reader_smoke_test.dart -r expanded

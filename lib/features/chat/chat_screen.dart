@@ -70,6 +70,8 @@ class _ChatScreenState extends State<ChatScreen> {
               ? _Welcome(composerKey: _composerKey)
               : _messages(state, c),
         ),
+        if (state.pendingPictureRead != null)
+          _ComposerDock(child: PictureReadCard(request: state.pendingPictureRead!)),
         if (state.pendingApproval != null)
           _ComposerDock(child: ToolApprovalCard(request: state.pendingApproval!)),
         if (c != null && c.messages.isNotEmpty)

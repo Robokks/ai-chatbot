@@ -10,11 +10,14 @@ import '../data/llm/local_provider.dart';
 import '../data/local/image_engine.dart';
 import '../data/local/image_gallery.dart';
 import '../data/local/local_models.dart';
+import '../data/local/picture_reader.dart';
 import '../data/models.dart';
 import '../server/discovery.dart';
 import '../server/host_controller.dart';
 import '../tools/tool_registry.dart';
+import 'attachment_prep.dart';
 import 'image_maker.dart';
+import 'pdf_pages.dart';
 
 const demoMode = bool.fromEnvironment('DEMO');
 
@@ -28,6 +31,8 @@ class AppState extends ChangeNotifier {
     ToolRegistry? tools,
     this._imageEngine,
     this._gallery,
+    this._pictureReader,
+    this._renderPdf,
   })  : localModels = localModels ?? LocalModelStore(storage),
         tools = tools ?? ToolRegistry(storage) {
     _providerFactory = providerFactory ?? _defaultProvider;
@@ -43,6 +48,12 @@ class AppState extends ChangeNotifier {
   late final ImageMaker images = ImageMaker(this, engine: _imageEngine, gallery: _gallery);
   final ImageEngineHost? _imageEngine;
   final ImageGallery? _gallery;
+  final LocalPictureReader? _pictureReader;
+  final PdfPageRenderer? _renderPdf;
+
+  /// Reads pictures and scanned PDFs for models that can't.
+  late final AttachmentPrep reader =
+      AttachmentPrep(this, local: _pictureReader, renderPdf: _renderPdf ?? defaultPdfRenderer);
 
   /// MCP servers, UTCP manuals, A2A agents and CLI programs the AI can use.
   final ToolRegistry tools;
@@ -354,6 +365,18 @@ class AppState extends ChangeNotifier {
         return _finish(c);
       }
 
+      if (round == 0 && !demoMode) {
+        await reader.prepare(history, provider,
+            onStatus: (s) {
+              streamingStatus = s;
+              notifyListeners();
+            },
+            stopped: () => _stopped,
+            ask: _askCloudRead);
+        streamingStatus = null;
+        if (_stopped) return _finish(c);
+      }
+
       final offered = demoMode ? const <ToolSpec>[] : tools.activeTools();
       await _stream(reply, history, offered);
       if (_stopped || reply.toolCalls.isEmpty) return _finish(c);
@@ -440,6 +463,24 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// A picture waiting for the user's OK to be read by a cloud model.
+  PictureReadRequest? pendingPictureRead;
+
+  Future<CloudReadChoice> _askCloudRead(Attachment a, ProviderKind cloud) async {
+    final request = pendingPictureRead = PictureReadRequest(a, cloud);
+    streamingStatus = 'Waiting for your answer…';
+    notifyListeners();
+    final choice = await request.answer.future;
+    pendingPictureRead = null;
+    notifyListeners();
+    return choice;
+  }
+
+  void answerPictureRead(CloudReadChoice choice) {
+    final r = pendingPictureRead;
+    if (r != null && !r.answer.isCompleted) r.answer.complete(choice);
+  }
+
   /// A tool run waiting for the user's OK.
   ToolApprovalRequest? pendingApproval;
 
@@ -477,6 +518,7 @@ class AppState extends ChangeNotifier {
   void stop() {
     _stopped = true;
     answerApproval(false);
+    answerPictureRead(CloudReadChoice.no);
     _sub?.cancel();
     if (!(_done?.isCompleted ?? true)) _done!.complete();
   }

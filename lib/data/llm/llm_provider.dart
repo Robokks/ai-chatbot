@@ -145,14 +145,31 @@ abstract class LlmProvider {
 }
 
 /// Inlines text attachments (and PDFs, for providers without native PDF
-/// support) as fenced blocks ahead of the user's own text.
-String inlineTextAttachments(Message m, {required bool includePdf}) {
+/// support) as fenced blocks ahead of the user's own text. With
+/// [includeImages] (models that can't see), pictures go in as the text the
+/// picture reader wrote, or a note that they couldn't be read. [maxPerFile]
+/// cuts each file for small context windows.
+String inlineTextAttachments(Message m,
+    {required bool includePdf, bool includeImages = false, int? maxPerFile}) {
+  String cut(String t) => maxPerFile == null || t.length <= maxPerFile
+      ? t
+      : '${t.substring(0, maxPerFile)}\n… [cut: ${t.length - maxPerFile} more characters not shown]';
   final parts = <String>[];
   for (final a in m.attachments) {
     final isText = a.kind == AttachmentKind.text;
-    final isPdfText = a.kind == AttachmentKind.pdf && includePdf;
-    if ((isText || isPdfText) && a.text != null) {
-      parts.add('<file name="${a.name}">\n${a.text}\n</file>');
+    final isPdf = a.kind == AttachmentKind.pdf && includePdf;
+    if ((isText || isPdf) && a.text != null) {
+      parts.add('<file name="${a.name}">\n${cut(a.text!)}\n</file>');
+    } else if (isPdf) {
+      parts.add('<file name="${a.name}">\n(This PDF has no text layer, so it could not be read'
+          '${a.readError == null ? '' : ': ${a.readError}'}.)\n</file>');
+    } else if (a.kind == AttachmentKind.image && includeImages) {
+      parts.add(a.text != null
+          ? '<image name="${a.name}">\n${cut(a.text!)}\n</image>'
+          : '<image name="${a.name}">\n(The user attached a picture, but it could not be read'
+              '${a.readError == null ? ': no picture reader is set up' : ': ${a.readError}'}. '
+              'Tell the user you can\'t see it and suggest downloading a picture reader in '
+              'Settings → On-device models.)\n</image>');
     }
   }
   if (m.text.isNotEmpty) parts.add(m.text);

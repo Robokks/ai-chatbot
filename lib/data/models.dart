@@ -29,6 +29,9 @@ class Attachment {
   Uint8List? bytes;
   String? text;
 
+  /// Why the picture reader couldn't read this (not saved).
+  String? readError;
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
