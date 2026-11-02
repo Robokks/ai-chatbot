@@ -4,6 +4,7 @@ import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
 import '../host/connect_screen.dart';
+import '../settings/free_auto_screen.dart';
 import '../settings/local_models_screen.dart';
 import '../settings/settings_screen.dart';
 
@@ -86,13 +87,25 @@ class _ModelList extends StatelessWidget {
     final available = ProviderKind.values.where(
       (k) => k != ProviderKind.local || AppState.localSupported,
     );
-    final kinds = [
-      ...available.where(state.hasKey),
-      ...available.where((k) => !state.hasKey(k)),
+    // Free Auto first, then the providers you have keys for. The rest are
+    // folded under "More providers" so the list stays short.
+    final ready = [
+      if (state.hasKey(ProviderKind.auto)) ProviderKind.auto,
+      ...available.where((k) => k != ProviderKind.auto && state.hasKey(k)),
     ];
+    final always = {ProviderKind.local, ProviderKind.network};
+    final kinds = [
+      ...ready,
+      ...available.where((k) => always.contains(k) && !state.hasKey(k)),
+    ];
+    final more = available
+        .where((k) => !state.hasKey(k) && !always.contains(k) && k != ProviderKind.auto)
+        .toList();
     String label(ProviderKind k, String m) => k == ProviderKind.local
         ? state.localModels.byId(m)?.name ?? m
-        : prettyModel(m);
+        : k == ProviderKind.auto
+            ? 'Free Auto (best free model that works)'
+            : prettyModel(m);
 
     return ListView(
       controller: scroll,
@@ -140,6 +153,15 @@ class _ModelList extends StatelessWidget {
                     },
                     child: Text(state.hasKey(k) ? 'Manage' : 'Download'),
                   )
+                else if (k == ProviderKind.auto)
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      Navigator.of(context).push(MaterialPageRoute<void>(
+                          builder: (_) => const FreeAutoScreen()));
+                    },
+                    child: const Text('Order'),
+                  )
                 else if (!state.hasKey(k))
                   TextButton(
                     onPressed: () {
@@ -167,6 +189,38 @@ class _ModelList extends StatelessWidget {
                 },
               ),
         ],
+        if (more.isNotEmpty)
+          Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              tilePadding: const EdgeInsets.symmetric(horizontal: 8),
+              title: Text('More providers (${more.length})',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(
+                  '${more.where((k) => k.free).length} of them have free plans. Tap one to add a key.',
+                  style: TextStyle(color: p.textMuted, fontSize: 12.5)),
+              children: [
+                for (final k in more)
+                  ListTile(
+                    dense: true,
+                    leading: ProviderAvatar(kind: k, size: 22),
+                    title: Text(k.label),
+                    subtitle: k.free
+                        ? Text('Free · ${k.freeNote}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Color(0xFF2E9E5B), fontSize: 12))
+                        : null,
+                    trailing: const Text('Add key'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.of(context).push(MaterialPageRoute<void>(
+                          builder: (_) => ProviderScreen(kind: k)));
+                    },
+                  ),
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -231,6 +285,17 @@ class ProviderAvatar extends StatelessWidget {
     ProviderKind.local: Color(0xFF3F7D58),
     ProviderKind.network: Color(0xFF8A6D3B),
     ProviderKind.custom: Color(0xFF7A7A7A),
+    ProviderKind.cerebras: Color(0xFFF15A29),
+    ProviderKind.mistral: Color(0xFFFA520F),
+    ProviderKind.github: Color(0xFF24292F),
+    ProviderKind.nvidia: Color(0xFF76B900),
+    ProviderKind.huggingface: Color(0xFFE8A317),
+    ProviderKind.cloudflare: Color(0xFFF38020),
+    ProviderKind.cohere: Color(0xFF39594D),
+    ProviderKind.sambanova: Color(0xFFEE7624),
+    ProviderKind.zai: Color(0xFF2D5BFF),
+    ProviderKind.freellmapi: Color(0xFF5B5BD6),
+    ProviderKind.auto: Color(0xFF2E9E5B),
   };
 
   @override
@@ -243,9 +308,9 @@ class ProviderAvatar extends StatelessWidget {
         color: _colors[kind],
         borderRadius: BorderRadius.circular(size * 0.3),
       ),
-      child: kind == ProviderKind.local
+      child: kind == ProviderKind.local || kind == ProviderKind.auto
           ? Icon(
-              Icons.offline_bolt_rounded,
+              kind == ProviderKind.auto ? Icons.auto_awesome_rounded : Icons.offline_bolt_rounded,
               color: Colors.white,
               size: size * 0.62,
             )

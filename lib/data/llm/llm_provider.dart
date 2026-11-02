@@ -18,8 +18,12 @@ class ChatDelta {
     this.usage,
     this.toolCalls = const [],
     this.providerBlocks,
+    this.servedBy,
   });
   final String text;
+
+  /// Free Auto: the provider and model that is answering.
+  final (ProviderKind, String)? servedBy;
   final String reasoning;
 
   /// A non-fatal message to show under the reply (e.g. a refusal).
@@ -140,6 +144,8 @@ abstract class LlmProvider {
         GeminiProvider(settings: settings, apiKey: apiKey, client: client),
       ApiStyle.local => throw UnsupportedError(
           'On-device models are created with LocalProvider, not LlmProvider.create'),
+      ApiStyle.auto => throw UnsupportedError(
+          'Free Auto is created with AutoProvider, not LlmProvider.create'),
     };
   }
 }

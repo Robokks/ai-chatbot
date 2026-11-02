@@ -9,6 +9,7 @@ import '../chat/model_picker.dart';
 import '../host/connect_screen.dart';
 import '../host/host_screen.dart';
 import '../tools/tools_screen.dart';
+import 'free_auto_screen.dart';
 import 'local_models_screen.dart';
 import 'usage_screen.dart';
 
@@ -83,35 +84,40 @@ class SettingsScreen extends StatelessWidget {
                 ),
             ],
           ),
-          const _SectionTitle('API keys'),
-          _Card(
-            children: [
-              for (final k in ProviderKind.values)
-                if (k != ProviderKind.local && k != ProviderKind.network)
-                  ListTile(
-                    leading: ProviderAvatar(kind: k, size: 32),
-                    title: Text(k.label),
-                    subtitle: Text(
-                      k == ProviderKind.custom
-                          ? 'OpenAI-compatible server'
-                          : state.hasKey(k)
-                          ? 'Connected'
-                          : 'Not set',
-                      style: TextStyle(
-                        color: state.hasKey(k) && k != ProviderKind.custom
-                            ? const Color(0xFF2E9E5B)
-                            : p.textMuted,
-                      ),
-                    ),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => ProviderScreen(kind: k),
-                      ),
-                    ),
-                  ),
-            ],
-          ),
+          if (state.hasKey(ProviderKind.auto)) ...[
+            const _SectionTitle('Free Auto'),
+            _Card(children: [
+              ListTile(
+                leading: const ProviderAvatar(kind: ProviderKind.auto, size: 32),
+                title: const Text('Free Auto'),
+                subtitle: Text(
+                  'Uses your free providers in order and switches when one hits its limit',
+                  style: TextStyle(color: p.textMuted),
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const FreeAutoScreen()),
+                ),
+              ),
+            ]),
+          ],
+          const _SectionTitle('Free AI (no credit card)'),
+          _Card(children: [
+            for (final k in ProviderKind.values)
+              if (k.free) _ProviderTile(kind: k),
+          ]),
+          const _SectionTitle('Paid AI'),
+          _Card(children: [
+            for (final k in ProviderKind.values)
+              if (!k.free &&
+                  k.style != ApiStyle.local &&
+                  k.style != ApiStyle.auto &&
+                  k != ProviderKind.network &&
+                  k != ProviderKind.custom)
+                _ProviderTile(kind: k),
+          ]),
+          const _SectionTitle('Other'),
+          _Card(children: [_ProviderTile(kind: ProviderKind.custom)]),
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
             child: Text(
@@ -237,6 +243,39 @@ class _SystemPromptFieldState extends State<_SystemPromptField> {
 }
 
 /// Key, endpoint and model list for one provider.
+class _ProviderTile extends StatelessWidget {
+  const _ProviderTile({required this.kind});
+  final ProviderKind kind;
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    final p = Palette.of(context);
+    final k = kind;
+    final connected = state.hasKey(k) && k != ProviderKind.custom;
+    return ListTile(
+      leading: ProviderAvatar(kind: k, size: 32),
+      title: Text(k.label),
+      subtitle: Text(
+        k == ProviderKind.custom
+            ? 'OpenAI-compatible server (Ollama, LM Studio, …)'
+            : connected
+                ? 'Connected'
+                : k.free
+                    ? k.freeNote
+                    : 'Not set',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: connected ? const Color(0xFF2E9E5B) : p.textMuted),
+      ),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => ProviderScreen(kind: k)),
+      ),
+    );
+  }
+}
+
 class ProviderScreen extends StatefulWidget {
   const ProviderScreen({super.key, required this.kind});
 
@@ -253,6 +292,13 @@ class _ProviderScreenState extends State<ProviderScreen> {
     text: _state.providers[widget.kind]!.baseUrl,
   );
   final _newModel = TextEditingController();
+
+  /// Cloudflare: the Account ID that fills `{account}` in the base URL.
+  late final _account = TextEditingController(
+    text: widget.kind.needsAccountId
+        ? RegExp(r'/accounts/([^/{}]+)/').firstMatch(_state.providers[widget.kind]!.baseUrl)?.group(1) ?? ''
+        : '',
+  );
   late List<String> _models = List.of(_state.providers[widget.kind]!.models);
   bool _obscure = true;
   bool _busy = false;
@@ -266,10 +312,15 @@ class _ProviderScreenState extends State<ProviderScreen> {
     _key.dispose();
     _url.dispose();
     _newModel.dispose();
+    _account.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
+    final account = _account.text.trim();
+    if (k.needsAccountId && account.isNotEmpty) {
+      _url.text = _url.text.replaceFirst(RegExp(r'/accounts/[^/]+/'), '/accounts/$account/');
+    }
     await _state.setKey(k, _key.text);
     await _state.updateProviderSettings(
       ProviderSettings(kind: k, baseUrl: _url.text.trim(), models: _models),
@@ -409,6 +460,27 @@ class _ProviderScreenState extends State<ProviderScreen> {
                 ),
               ),
             ),
+            if (k.needsAccountId)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: TextField(
+                  controller: _account,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Account ID',
+                    helperText: 'On the Cloudflare dashboard: Workers AI → "Use REST API". The token '
+                        'needs the "Workers AI" permission.',
+                    helperMaxLines: 3,
+                    prefixIcon: Icon(Icons.badge_outlined),
+                  ),
+                ),
+              ),
+            if (k.free && k.freeNote.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text('Free: ${k.freeNote}',
+                    style: TextStyle(color: p.textMuted, fontSize: 13)),
+              ),
             if (k.keyUrl.isNotEmpty)
               Align(
                 alignment: Alignment.centerLeft,
@@ -430,6 +502,10 @@ class _ProviderScreenState extends State<ProviderScreen> {
                         ? null
                         : () async {
                             final messenger = ScaffoldMessenger.of(context);
+                            if (_key.text.trim().isNotEmpty && k != ProviderKind.custom) {
+                              // Check the key and load this provider's models.
+                              return _test();
+                            }
                             await _save();
                             messenger.showSnackBar(
                               const SnackBar(content: Text('Saved')),

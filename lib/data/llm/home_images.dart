@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 
 import '../local/image_engine.dart';
 
@@ -36,7 +37,7 @@ class HomeImageClient {
 
   /// Asks the host for one 512×512 picture. [job] can stop the wait.
   Future<MadeImage> generate(String baseUrl, String key, String prompt,
-      {String? model, int? seed, ImageJob? job}) async {
+      {String? model, int? seed, ImageJob? job, String? size = '512x512'}) async {
     final c = _newClient();
     final watch = Stopwatch()..start();
     final cancelled = Completer<Never>();
@@ -56,7 +57,7 @@ class HomeImageClient {
                 'prompt': prompt,
                 'model': ?model,
                 'n': 1,
-                'size': '512x512',
+                'size': ?size,
                 'response_format': 'b64_json',
                 'seed': ?seed,
               }),
@@ -71,10 +72,12 @@ class HomeImageClient {
             '(error ${res.statusCode}).'}');
       }
       final first = ((j as Map)['data'] as List).first as Map;
+      final png = base64Decode(first['b64_json'] as String);
+      final info = img.findDecoderForData(png)?.startDecode(png);
       return MadeImage(
-        png: base64Decode(first['b64_json'] as String),
-        width: 512,
-        height: 512,
+        png: png,
+        width: info?.width ?? 512,
+        height: info?.height ?? 512,
         seed: (first['seed'] as num?)?.toInt() ?? seed ?? 0,
         elapsed: watch.elapsed,
       );

@@ -51,13 +51,9 @@ class HostController extends ChangeNotifier implements HostBackend, HostImages {
 
   /// Cloud providers that can be shared (never the network provider itself,
   /// which would loop back to another host).
-  static const shareableCloud = [
-    ProviderKind.anthropic,
-    ProviderKind.openai,
-    ProviderKind.deepseek,
-    ProviderKind.gemini,
-    ProviderKind.openrouter,
-    ProviderKind.groq,
+  static final shareableCloud = [
+    for (final k in ProviderKind.values)
+      if (k != ProviderKind.local && k != ProviderKind.network && k != ProviderKind.custom) k,
   ];
 
   bool shareLocal = true;

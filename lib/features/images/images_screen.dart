@@ -67,6 +67,12 @@ class _ImagesScreenState extends State<ImagesScreen> {
       listenable: Listenable.merge([maker, maker.gallery, state.localModels]),
       builder: (context, _) {
         final showDownload = maker.localModel == null && maker.unsupported == null;
+        // Ready places, plus "This device" while its model can still be downloaded.
+        final choices = [
+          ...maker.targets,
+          if (showDownload && !maker.targets.contains(ImageTarget.thisDevice) && maker.targets.isNotEmpty)
+            ImageTarget.thisDevice,
+        ];
         return Scaffold(
           appBar: AppBar(title: const Text('Create images')),
           body: ListView(
@@ -78,45 +84,69 @@ class _ImagesScreenState extends State<ImagesScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      if (maker.hostOffers && (maker.canMakeHere || showDownload)) ...[
+                      if (choices.length > 1) ...[
                         Text('Make on', style: TextStyle(color: p.textMuted, fontSize: 13)),
                         const SizedBox(height: 6),
-                        SegmentedButton<ImageTarget>(
-                          segments: [
-                            const ButtonSegment(
-                                value: ImageTarget.thisDevice,
-                                icon: Icon(Icons.smartphone_rounded),
-                                label: Text('This device')),
-                            ButtonSegment(
-                                value: ImageTarget.homeServer,
-                                icon: const Icon(Icons.computer_rounded),
-                                label: Text(maker.hostName, overflow: TextOverflow.ellipsis)),
+                        DropdownButtonFormField<ImageTarget>(
+                          initialValue: maker.target,
+                          isExpanded: true,
+                          itemHeight: null,
+                          decoration: const InputDecoration(
+                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+                          items: [
+                            for (final t in choices)
+                              DropdownMenuItem(
+                                value: t,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(maker.labelOf(t), overflow: TextOverflow.ellipsis),
+                                    Text(
+                                        t == ImageTarget.thisDevice && maker.localModel == null
+                                            ? 'Offline · download first'
+                                            : t.note,
+                                        style: TextStyle(color: p.textMuted, fontSize: 12)),
+                                  ],
+                                ),
+                              ),
                           ],
-                          selected: {maker.target},
-                          onSelectionChanged: maker.busy ? null : (s) => maker.setTarget(s.first),
+                          onChanged: maker.busy
+                              ? null
+                              : (t) {
+                                  if (t != null) maker.setTarget(t);
+                                },
                         ),
                         const SizedBox(height: 14),
-                      ] else if (maker.hostOffers && !maker.canMakeHere)
+                      ] else if (maker.target != ImageTarget.thisDevice && maker.available)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 12),
-                          child: Text('Pictures are made on ${maker.hostName}.',
+                          child: Text('Pictures are made on ${maker.labelOf(maker.target)}.',
                               style: TextStyle(color: p.textMuted, fontSize: 13)),
                         ),
+                      if (!maker.available || (maker.target == ImageTarget.thisDevice && showDownload)) ...[
+                        _Info(
+                          icon: Icons.auto_awesome_outlined,
+                          text: 'Best pictures, free: add a free Cloudflare or Hugging Face key in '
+                              'Settings → Free AI. They make FLUX pictures online.',
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       if (maker.target == ImageTarget.thisDevice && showDownload) ...[
                         _Info(
                           icon: Icons.download_rounded,
-                          text: 'To make pictures on this device, download the image model once '
-                              '(Wi-Fi recommended). After that it works without internet.',
+                          text: 'Or make simple pictures without internet: download the small '
+                              'image model once (Wi-Fi recommended).',
                         ),
                         const SizedBox(height: 10),
                         for (final m in state.localModels.imageModels)
                           LocalModelCard(device: _device, info: m, selected: false),
                         const SizedBox(height: 6),
                       ],
-                      if (maker.unsupported != null && !maker.hostOffers)
+                      if (maker.unsupported != null && !maker.available)
                         _Info(
                           icon: Icons.info_outline_rounded,
-                          text: '${maker.unsupported} You can still make pictures with a PC: '
+                          text: '${maker.unsupported} You can also make pictures with a PC: '
                               'share it from the PC (Settings → Share this device → Share image '
                               'maker), then connect to it here.',
                         ),

@@ -188,7 +188,8 @@ class _SharedModels extends StatelessWidget {
               '${state.localModels.installedImageModel!.name} · other devices can make pictures here'),
         ),
       for (final k in HostController.shareableCloud)
-        SwitchListTile(
+        if (state.hasKey(k))
+          SwitchListTile(
           value: host.sharedCloud.contains(k),
           onChanged: state.hasKey(k) ? (v) => host.setShareCloud(k, v) : null,
           secondary: ProviderAvatar(kind: k, size: 30),

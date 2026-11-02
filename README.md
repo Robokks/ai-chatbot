@@ -92,6 +92,38 @@ Open **Settings → On-device models** (or the model picker → On-device → Do
 - Android needs a 64-bit phone with Android 10 or later. The model list lives in
   `lib/data/local/local_models.dart`.
 
+## Free AI providers
+
+Many AI companies have free plans with no credit card. Open **Settings → Free AI**, tap one,
+tap **Get a key**, paste the key and tap **Save**: the app checks it and loads the models.
+
+| Provider | What you get free | Notes |
+|---|---|---|
+| Gemini | Daily limits per model | Key from Google AI Studio |
+| Groq | Very fast, per-minute and daily limits | |
+| Cerebras | Extremely fast, about 1M tokens a day | |
+| Mistral | Free "Experiment" plan | Needs a phone number; can see pictures |
+| OpenRouter | Models ending in `:free` | About 50 requests a day |
+| GitHub Models | GPT-4.1 and others, small daily limits | GitHub token with "Models" access |
+| NVIDIA | Many open models while you try them | |
+| Hugging Face | Small monthly credit | Also free FLUX pictures |
+| Cloudflare | Daily allowance | Needs your Account ID; also free FLUX pictures |
+| Cohere | 1000 requests a month | |
+| SambaNova | Fast open models | |
+| Z.ai | GLM-4.5-Flash | |
+| FreeLLMAPI | All of the above, pooled on your PC | Runs on your PC; set its address and key |
+
+**Free Auto** appears in the model list once you have a free key. It uses your free providers
+in order (Settings → Free AI → Free Auto to change it). When one says its limit is reached or
+fails before answering, it moves to the next. The reply shows which model answered. An answer is
+never mixed from two models.
+
+**Free pictures:** with a Cloudflare or Hugging Face key, **Create images** can make FLUX
+pictures online, which look much better than the small offline model. Choose under **Make on**.
+
+Free plans change often and have limits. Use one account per company: making many accounts to
+get more free use breaks their rules. What you send goes to that company.
+
 ## Files the AI can read
 
 Attach almost any file. The AI gets what is inside it and keeps it for the rest of the chat.

@@ -146,7 +146,30 @@ The user chose: image maker first, on phone + PC, with sharing; the bigger app i
 - Widget-test gotcha: code that does real file IO must run in `tester.runAsync`, and fake
   timers don't advance inside it, so test the making in unit tests.
 
-### 2B. Still to do from the same request: OCR for PDFs, voice cloner, on device
+### 2B-2. Files the AI can read: DONE (commit 1e3aced)
+Office/ODF/RTF/EPUB/ZIP readers (`lib/features/attachments/document_text.dart`), LFM2-VL picture
+readers with projector (`LocalModelKind.vision`, `<id>.mmproj.gguf`), `AttachmentPrep`
+(`lib/state/attachment_prep.dart`) reads pictures/scanned PDFs (pdfrx, `lib/state/pdf_pages.dart`)
+for models without `images`/`pdf`, asks before a cloud reader (Yes/Always/No, setting
+`reader.cloudAlways`), host does the same via `HostServer.prepareAttachments`. Smoke:
+`reader-smoke.yml`. `test/pdf_pages_test.dart` needs `PDFIUM_PATH` (skipped otherwise; not run
+yet anywhere, the auto-mode classifier blocked loading a downloaded libpdfium locally).
+
+### 2B-3. Free providers + Free Auto + free online pictures: DONE (this session)
+The user shared FreeLLMAPI (github.com/tashfeenahmed/freellmapi) and asked to "adopt all models".
+- New `ProviderKind`s (OpenAI style): cerebras, mistral, github, nvidia, huggingface, cloudflare
+  (`needsAccountId`, `{account}` in baseUrl, Account ID field), cohere, sambanova, zai, freellmapi;
+  `free`/`freeNote` fields; gemini/groq/openrouter marked free. Settings grouped Free/Paid/Other;
+  model picker folds providers without keys under "More providers".
+- `ProviderKind.auto` + `lib/data/llm/auto_provider.dart`: routes (setting `auto.routes`), failover
+  before first token, 429 rest 15 min, 401/403 rest 1 h, `ChatDelta.servedBy` sets the reply's real
+  provider/model. Screen: `lib/features/settings/free_auto_screen.dart`.
+- Pictures: `ImageTarget` = cloudflare, huggingface, freellmapi, homeServer, thisDevice
+  (`lib/data/llm/cloud_images.dart`, FLUX.1-schnell); choice in setting `images.target`.
+- The user found SDXS pictures "very bad"; SD-Turbo (2 GB) was offered but not chosen yet.
+- No real keys were tested; ask the user to try Groq/Cerebras + Cloudflare.
+
+### 2B. Still to do from the same request: voice cloner, on device
 
 The user wrote: "Integrate Image generator & ocr pdf voice cloner. All open source model, less space consumption model." They want plan mode first. Research so far: the `llamadart` 0.17 package the app already uses (see its README in the pub cache) supports all three.
 - **OCR**: a small vision GGUF plus its mmproj projector through llamadart multimodal, e.g. Liquid AI **LFM2-VL-450M** (the user likes LFM) or SmolVLM-256M. Scanned PDFs need pages turned into images first; `pdfrx` is one option, but check its size. The app already pulls text from PDFs that have a text layer.

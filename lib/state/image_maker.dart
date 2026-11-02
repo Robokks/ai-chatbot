@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../data/llm/cloud_images.dart';
 import '../data/llm/home_images.dart';
 import '../data/local/image_engine.dart';
 import '../data/local/image_gallery.dart';
@@ -10,23 +11,36 @@ import '../data/models.dart';
 import 'app_state.dart';
 
 /// Where a picture is made.
-enum ImageTarget { thisDevice, homeServer }
+enum ImageTarget {
+  cloudflare('Cloudflare FLUX', 'Free online · good quality'),
+  huggingface('Hugging Face FLUX', 'Free online · good quality'),
+  freellmapi('FreeLLMAPI', 'Free online through your PC'),
+  homeServer('Home server', 'Your PC on this Wi-Fi'),
+  thisDevice('This device', 'Offline · small model, simple pictures');
 
-/// The image maker: makes pictures on this device or on the paired home
-/// server and keeps them in the [gallery].
+  const ImageTarget(this.label, this.note);
+  final String label;
+  final String note;
+}
+
+/// The image maker: makes pictures on this device, the paired home server
+/// or a free online service, and keeps them in the [gallery].
 class ImageMaker extends ChangeNotifier {
   ImageMaker(
     this.app, {
     ImageEngineHost? engine,
     HomeImageClient? home,
+    CloudImageClient? cloud,
     ImageGallery? gallery,
   })  : engine = engine ?? ImageEngineHost.instance,
         home = home ?? HomeImageClient(),
+        cloud = cloud ?? CloudImageClient(),
         gallery = gallery ?? ImageGallery(app.storage);
 
   final AppState app;
   final ImageEngineHost engine;
   final HomeImageClient home;
+  final CloudImageClient cloud;
   final ImageGallery gallery;
 
   /// Image models the paired home server shares.
@@ -36,7 +50,7 @@ class ImageMaker extends ChangeNotifier {
   String? unsupported;
   bool _checked = false;
 
-  ImageTarget target = ImageTarget.thisDevice;
+  static const _targetKey = 'images.target';
 
   bool get busy => _job != null;
   ImageJob? _job;
@@ -47,10 +61,32 @@ class ImageMaker extends ChangeNotifier {
   bool get canMakeHere => unsupported == null && localModel != null;
   bool get hostOffers => hostModels.isNotEmpty && app.connectedHostName != null;
 
-  /// Whether a picture can be made right now somewhere.
-  bool get available => canMakeHere || hostOffers;
-
   String get hostName => app.connectedHostName ?? 'Home server';
+
+  bool _ready(ImageTarget t) => switch (t) {
+        ImageTarget.cloudflare => app.hasKey(ProviderKind.cloudflare),
+        ImageTarget.huggingface => app.hasKey(ProviderKind.huggingface),
+        ImageTarget.freellmapi => app.hasKey(ProviderKind.freellmapi),
+        ImageTarget.homeServer => hostOffers,
+        ImageTarget.thisDevice => canMakeHere,
+      };
+
+  /// Places a picture can be made right now, best first.
+  List<ImageTarget> get targets => [for (final t in ImageTarget.values) if (_ready(t)) t];
+
+  /// Whether a picture can be made right now somewhere.
+  bool get available => targets.isNotEmpty;
+
+  /// The user's choice when it is available, else the best available place.
+  /// "This device" is the answer when nothing is ready (it shows the
+  /// download).
+  ImageTarget get target {
+    final saved = ImageTarget.values.asNameMap()[app.storage.getSetting(_targetKey)];
+    if (saved != null && _ready(saved)) return saved;
+    return targets.firstOrNull ?? ImageTarget.thisDevice;
+  }
+
+  String labelOf(ImageTarget t) => t == ImageTarget.homeServer ? hostName : t.label;
 
   /// Checks this device and the home server once (or again with [force]).
   Future<void> refresh({bool force = false}) async {
@@ -63,15 +99,11 @@ class ImageMaker extends ChangeNotifier {
     hostModels = s == null || s.baseUrl.isEmpty || key.isEmpty || app.connectedHostName == null
         ? const []
         : await home.models(s.baseUrl, key);
-    if (target == ImageTarget.homeServer && !hostOffers) target = ImageTarget.thisDevice;
-    if (target == ImageTarget.thisDevice && !canMakeHere && hostOffers) {
-      target = ImageTarget.homeServer;
-    }
     notifyListeners();
   }
 
-  void setTarget(ImageTarget t) {
-    target = t;
+  Future<void> setTarget(ImageTarget t) async {
+    await app.storage.setSetting(_targetKey, t.name);
     notifyListeners();
   }
 
@@ -90,26 +122,37 @@ class ImageMaker extends ChangeNotifier {
     _progress('Starting…', null);
     try {
       final MadeImage image;
-      final String madeOn;
-      if (at == ImageTarget.homeServer) {
-        if (!hostOffers) throw const ImageMakerException('The home server does not share the image maker.');
-        _progress('Making the picture on $hostName…', null);
-        final s = app.providers[ProviderKind.network]!;
-        image = await home.generate(s.baseUrl, app.keyFor(ProviderKind.network), prompt,
-            model: hostModels.first, seed: seed, job: job);
-        madeOn = hostName;
-      } else {
-        final m = localModel;
-        if (m == null) {
-          throw const ImageMakerException('Download the image model first (Create images → Download).');
-        }
-        image = await engine.generate(await app.localModels.pathFor(m.id), prompt,
-            seed: seed, job: job, onProgress: _progress);
-        madeOn = 'This device';
+      switch (at) {
+        case ImageTarget.cloudflare:
+          _progress('Making the picture on Cloudflare…', null);
+          image = await cloud.cloudflare(app.providers[ProviderKind.cloudflare]!.baseUrl,
+              app.keyFor(ProviderKind.cloudflare), prompt,
+              seed: seed, job: job);
+        case ImageTarget.huggingface:
+          _progress('Making the picture on Hugging Face…', null);
+          image = await cloud.huggingFace(app.keyFor(ProviderKind.huggingface), prompt, seed: seed, job: job);
+        case ImageTarget.freellmapi:
+          _progress('Making the picture through FreeLLMAPI…', null);
+          image = await home.generate(app.providers[ProviderKind.freellmapi]!.baseUrl,
+              app.keyFor(ProviderKind.freellmapi), prompt,
+              seed: seed, job: job, size: null);
+        case ImageTarget.homeServer:
+          if (!hostOffers) throw const ImageMakerException('The home server does not share the image maker.');
+          _progress('Making the picture on $hostName…', null);
+          final s = app.providers[ProviderKind.network]!;
+          image = await home.generate(s.baseUrl, app.keyFor(ProviderKind.network), prompt,
+              model: hostModels.first, seed: seed, job: job);
+        case ImageTarget.thisDevice:
+          final m = localModel;
+          if (m == null) {
+            throw const ImageMakerException('Download the image model first (Create images → Download).');
+          }
+          image = await engine.generate(await app.localModels.pathFor(m.id), prompt,
+              seed: seed, job: job, onProgress: _progress);
       }
       return await gallery.add(image.png,
           prompt: prompt.trim(),
-          madeOn: madeOn,
+          madeOn: labelOf(at),
           width: image.width,
           height: image.height,
           seed: image.seed);

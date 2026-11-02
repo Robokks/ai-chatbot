@@ -313,7 +313,7 @@ class Conversation {
 }
 
 /// API style a provider speaks.
-enum ApiStyle { anthropic, openai, gemini, local }
+enum ApiStyle { anthropic, openai, gemini, local, auto }
 
 /// Supported providers. Most non-Anthropic/Google vendors expose an
 /// OpenAI-compatible Chat Completions endpoint.
@@ -357,6 +357,8 @@ enum ProviderKind {
     keyUrl: 'https://aistudio.google.com/apikey',
     images: true,
     pdf: true,
+    free: true,
+    freeNote: 'Free key from Google AI Studio. Daily limits per model.',
   ),
   openrouter(
     label: 'OpenRouter',
@@ -367,6 +369,8 @@ enum ProviderKind {
     keyUrl: 'https://openrouter.ai/keys',
     images: true,
     pdf: false,
+    free: true,
+    freeNote: 'Models ending in ":free" cost nothing (about 50 requests a day).',
   ),
   groq(
     label: 'Groq',
@@ -375,6 +379,139 @@ enum ProviderKind {
     baseUrl: 'https://api.groq.com/openai/v1',
     models: ['llama-3.3-70b-versatile'],
     keyUrl: 'https://console.groq.com/keys',
+    images: false,
+    pdf: false,
+    free: true,
+    freeNote: 'Very fast. Free plan with per-minute and daily limits.',
+  ),
+  cerebras(
+    label: 'Cerebras',
+    vendor: 'Cerebras',
+    style: ApiStyle.openai,
+    baseUrl: 'https://api.cerebras.ai/v1',
+    models: ['gpt-oss-120b', 'llama-3.3-70b', 'qwen-3-32b'],
+    keyUrl: 'https://cloud.cerebras.ai',
+    images: false,
+    pdf: false,
+    free: true,
+    freeNote: 'Extremely fast. About a million free tokens a day.',
+  ),
+  mistral(
+    label: 'Mistral',
+    vendor: 'Mistral AI',
+    style: ApiStyle.openai,
+    baseUrl: 'https://api.mistral.ai/v1',
+    models: ['mistral-medium-latest', 'mistral-small-latest', 'codestral-latest'],
+    keyUrl: 'https://console.mistral.ai/api-keys',
+    images: true,
+    pdf: false,
+    free: true,
+    freeNote: 'Free "Experiment" plan (needs a phone number). Can see pictures.',
+  ),
+  github(
+    label: 'GitHub Models',
+    vendor: 'GitHub',
+    style: ApiStyle.openai,
+    baseUrl: 'https://models.github.ai/inference',
+    models: ['openai/gpt-4.1', 'openai/gpt-4.1-mini', 'meta/Llama-4-Maverick-17B-128E-Instruct-FP8'],
+    keyUrl: 'https://github.com/settings/personal-access-tokens',
+    images: true,
+    pdf: false,
+    free: true,
+    freeNote: 'Use a GitHub token with "Models" access. Small daily limits, includes GPT-4.1.',
+  ),
+  nvidia(
+    label: 'NVIDIA',
+    vendor: 'NVIDIA NIM',
+    style: ApiStyle.openai,
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+    models: ['deepseek-ai/deepseek-r1', 'meta/llama-3.3-70b-instruct', 'qwen/qwen3-235b-a22b'],
+    keyUrl: 'https://build.nvidia.com/settings/api-keys',
+    images: false,
+    pdf: false,
+    free: true,
+    freeNote: 'Many open models for free while you try them (40 requests a minute).',
+  ),
+  huggingface(
+    label: 'Hugging Face',
+    vendor: 'Hugging Face',
+    style: ApiStyle.openai,
+    baseUrl: 'https://router.huggingface.co/v1',
+    models: ['openai/gpt-oss-120b', 'meta-llama/Llama-3.3-70B-Instruct', 'Qwen/Qwen3-235B-A22B'],
+    keyUrl: 'https://huggingface.co/settings/tokens',
+    images: false,
+    pdf: false,
+    free: true,
+    freeNote: 'Small free monthly credit. Also makes free FLUX pictures.',
+  ),
+  cloudflare(
+    label: 'Cloudflare',
+    vendor: 'Cloudflare Workers AI',
+    style: ApiStyle.openai,
+    baseUrl: 'https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1',
+    models: ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/qwen/qwq-32b', '@cf/openai/gpt-oss-120b'],
+    keyUrl: 'https://dash.cloudflare.com/profile/api-tokens',
+    images: false,
+    pdf: false,
+    free: true,
+    freeNote: 'Free daily allowance. Needs your Account ID. Also makes free FLUX pictures.',
+    needsAccountId: true,
+  ),
+  cohere(
+    label: 'Cohere',
+    vendor: 'Cohere',
+    style: ApiStyle.openai,
+    baseUrl: 'https://api.cohere.ai/compatibility/v1',
+    models: ['command-a-03-2025', 'command-r-plus-08-2024'],
+    keyUrl: 'https://dashboard.cohere.com/api-keys',
+    images: false,
+    pdf: false,
+    free: true,
+    freeNote: 'Free trial key, 1000 requests a month.',
+  ),
+  sambanova(
+    label: 'SambaNova',
+    vendor: 'SambaNova',
+    style: ApiStyle.openai,
+    baseUrl: 'https://api.sambanova.ai/v1',
+    models: ['DeepSeek-V3-0324', 'Meta-Llama-3.3-70B-Instruct'],
+    keyUrl: 'https://cloud.sambanova.ai/apis',
+    images: false,
+    pdf: false,
+    free: true,
+    freeNote: 'Fast open models with a free plan.',
+  ),
+  zai(
+    label: 'Z.ai',
+    vendor: 'Zhipu GLM',
+    style: ApiStyle.openai,
+    baseUrl: 'https://api.z.ai/api/paas/v4',
+    models: ['glm-4.5-flash'],
+    keyUrl: 'https://z.ai/manage-apikey/apikey-list',
+    images: false,
+    pdf: false,
+    free: true,
+    freeNote: 'GLM-4.5-Flash is free.',
+  ),
+  freellmapi(
+    label: 'FreeLLMAPI',
+    vendor: 'Your PC (free providers pooled)',
+    style: ApiStyle.openai,
+    baseUrl: 'http://localhost:3001/v1',
+    models: ['auto'],
+    keyUrl: 'https://github.com/tashfeenahmed/freellmapi',
+    images: true,
+    pdf: false,
+    free: true,
+    freeNote: 'Runs on your PC. Set its address (e.g. http://192.168.1.10:3001/v1) and key.',
+  ),
+  auto(
+    label: 'Free Auto',
+    vendor: 'Picks a free model for you',
+    style: ApiStyle.auto,
+    baseUrl: '',
+    models: ['auto'],
+    keyUrl: '',
     images: false,
     pdf: false,
   ),
@@ -418,9 +555,21 @@ enum ProviderKind {
     required this.keyUrl,
     required this.images,
     required this.pdf,
+    this.free = false,
+    this.freeNote = '',
+    this.needsAccountId = false,
   });
 
   final String label;
+
+  /// Has a free plan that needs no credit card.
+  final bool free;
+
+  /// One line about the free plan, shown in Settings.
+  final String freeNote;
+
+  /// The base URL has an `{account}` part the user fills in (Cloudflare).
+  final bool needsAccountId;
   final String vendor;
   final ApiStyle style;
   final String baseUrl;

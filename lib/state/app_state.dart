@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../core/storage.dart';
+import '../data/llm/auto_provider.dart';
 import '../data/llm/demo_provider.dart';
 import '../data/llm/llm_provider.dart';
 import '../data/llm/local_provider.dart';
@@ -166,7 +167,36 @@ class AppState extends ChangeNotifier {
     if (k == ProviderKind.local) {
       return localSupported && (providers[ProviderKind.local]?.models.isNotEmpty ?? false);
     }
+    if (k == ProviderKind.auto) return !demoMode && autoRoutes.any((r) => r.enabled);
+    if (k.needsAccountId && (providers[k]?.baseUrl.contains('{account}') ?? true)) return false;
     return demoMode || k == ProviderKind.custom || (_keys[k]?.isNotEmpty ?? false);
+  }
+
+  /// Free Auto: providers that hit their limit, and the last one used.
+  final AutoCooldowns autoCooldowns = AutoCooldowns();
+
+  /// Free Auto's providers, in the order it tries them.
+  List<AutoRoute> get autoRoutes => resolveAutoRoutes(
+        storage.getSetting('auto.routes'),
+        hasKey: (k) => k != ProviderKind.auto && hasKey(k),
+        modelsFor: (k) => providers[k]?.models ?? const [],
+      );
+
+  Future<void> saveAutoRoutes(List<AutoRoute> routes) async {
+    await storage.setSetting('auto.routes', encodeAutoRoutes(routes));
+    notifyListeners();
+  }
+
+  LlmProvider _build(ProviderKind k, {String? key}) {
+    if (k == ProviderKind.auto) {
+      return AutoProvider(
+        settings: providers[k]!,
+        routes: autoRoutes,
+        providerFor: (sub) => _providerFactory(providers[sub]!, keyFor(sub)),
+        cooldowns: autoCooldowns,
+      );
+    }
+    return _providerFactory(providers[k]!, key ?? keyFor(k));
   }
   String keyFor(ProviderKind k) => _keys[k] ?? '';
 
@@ -194,7 +224,7 @@ class AppState extends ChangeNotifier {
   }
 
   /// A provider ready to chat with [k] using its saved settings and key.
-  LlmProvider providerFor(ProviderKind k) => _providerFactory(providers[k]!, keyFor(k));
+  LlmProvider providerFor(ProviderKind k) => _build(k);
 
   /// Name of the host this device is paired with, if any.
   String? get connectedHostName => storage.getSetting('network.hostName');
@@ -240,7 +270,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<List<String>> fetchModels(ProviderKind k, {String? key}) {
-    final p = _providerFactory(providers[k]!, key ?? keyFor(k));
+    final p = _build(k, key: key);
     return p.listModels();
   }
 
@@ -418,7 +448,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _stream(Message reply, List<Message> history, List<ToolSpec> offered) async {
-    final llm = _providerFactory(providers[provider]!, keyFor(provider));
+    final llm = _build(provider);
     final done = _done = Completer<void>();
     _sub = llm
         .streamChat(ChatRequest(
@@ -441,6 +471,10 @@ class AppState extends ChangeNotifier {
             reply.toolCalls.addAll(d.toolCalls);
             if (d.providerBlocks != null) reply.providerBlocks = d.providerBlocks;
             if (d.notice != null) reply.error = d.notice;
+            if (d.servedBy != null) {
+              reply.provider = d.servedBy!.$1;
+              reply.model = d.servedBy!.$2;
+            }
             notifyListeners();
           },
           onError: (Object e) {
