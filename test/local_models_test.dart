@@ -59,9 +59,26 @@ void main() {
       store.cancel('tiny');
       chunks.add([4]);
       await expectLater(future, throwsA(isA<DownloadCancelled>()));
-      await chunks.close();
+      // Not awaited: when the cancel lands before the transfer starts,
+      // nobody ever listens, and close() would wait forever.
+      unawaited(chunks.close());
       expect(dir.listSync(), isEmpty);
       expect(store.installed, isEmpty);
+    });
+
+    test('cancel right away (before the transfer starts) also stops it', () async {
+      var asked = false;
+      final client = MockClient.streaming((_, _) async {
+        asked = true;
+        return http.StreamedResponse(Stream.value([1, 2, 3]), 200, contentLength: 3);
+      });
+      final store = LocalModelStore(null, dir: dir, client: client);
+      final future = store.download(_model);
+      store.cancel('tiny');
+      await expectLater(future, throwsA(isA<DownloadCancelled>()));
+      expect(asked, isFalse);
+      expect(dir.listSync(), isEmpty);
+      expect(store.progress, isEmpty);
     });
 
     test('HTTP errors are reported and clean up', () async {

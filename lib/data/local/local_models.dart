@@ -391,6 +391,7 @@ class LocalModelStore extends ChangeNotifier {
   Future<void> download(LocalModelInfo m) async {
     if (progress.containsKey(m.id)) return;
     progress[m.id] = 0;
+    _cancelRequested.remove(m.id);
     interrupted.remove(m.id);
     notifyListeners();
     // A vision model is two files: its projector (first) and the model.
@@ -404,6 +405,8 @@ class LocalModelStore extends ChangeNotifier {
       for (var i = 0; i < parts.length; i++) {
         final (partId, url, path, sha) = parts[i];
         if (parts.length > 1 && await File(path).exists()) continue;
+        // Cancel tapped before this file started downloading.
+        if (_cancelRequested.contains(m.id)) throw DownloadCancelled();
         current = partId;
         _activePart[m.id] = partId;
         final label = parts.length > 1 ? 'Part ${i + 1} of ${parts.length}: ' : '';
@@ -421,6 +424,11 @@ class LocalModelStore extends ChangeNotifier {
             notifyListeners();
           },
         );
+        if (_cancelRequested.contains(m.id)) {
+          // Cancelled while the system downloader was starting up.
+          if (await File(file).exists()) await File(file).delete();
+          throw DownloadCancelled();
+        }
         status[m.id] = 'Checking file…';
         progress[m.id] = 1;
         notifyListeners();
@@ -443,6 +451,7 @@ class LocalModelStore extends ChangeNotifier {
       rethrow;
     } finally {
       _activePart.remove(m.id);
+      _cancelRequested.remove(m.id);
       progress.remove(m.id);
       status.remove(m.id);
       notifyListeners();
@@ -451,6 +460,10 @@ class LocalModelStore extends ChangeNotifier {
 
   /// The download id of the file being fetched for each model.
   final Map<String, String> _activePart = {};
+
+  /// Cancels asked for while a download was still getting ready (the
+  /// downloader only knows about a download once its file transfer starts).
+  final Set<String> _cancelRequested = {};
 
   static Future<void> _move(String from, String to) async {
     if (from == to) return;
@@ -462,7 +475,10 @@ class LocalModelStore extends ChangeNotifier {
     }
   }
 
-  Future<void> cancel(String id) => _downloader.cancel(_activePart[id] ?? id);
+  Future<void> cancel(String id) {
+    if (progress.containsKey(id)) _cancelRequested.add(id);
+    return _downloader.cancel(_activePart[id] ?? id);
+  }
 
   /// Bytes used by downloaded and partial model files.
   Future<int> bytesOnDisk() async {
