@@ -113,6 +113,8 @@ class OpenAiProvider extends LlmProvider {
       'model': req.model,
       'stream': true,
       'messages': messages,
+      if (req.maxOutputTokens != null)
+        (settings.kind == ProviderKind.openai ? 'max_completion_tokens' : 'max_tokens'): req.maxOutputTokens,
       // Ask for token counts in the final event. Custom servers and Groq may
       // reject unknown options, so only send it where it is supported.
       if (_reportsUsage) 'stream_options': {'include_usage': true},

@@ -91,7 +91,7 @@ class AnthropicProvider extends LlmProvider {
 
     return {
       'model': req.model,
-      'max_tokens': 64000,
+      'max_tokens': req.maxOutputTokens ?? 64000,
       'stream': true,
       'messages': messages,
       if (req.systemPrompt?.trim().isNotEmpty ?? false)

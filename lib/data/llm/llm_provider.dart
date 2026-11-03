@@ -44,10 +44,12 @@ class ChatRequest {
     required this.messages,
     this.systemPrompt,
     this.tools = const [],
+    this.maxOutputTokens,
   });
   final String model;
   final List<Message> messages;
   final String? systemPrompt;
+  final int? maxOutputTokens;
 
   /// Tools the model may call this turn.
   final List<ToolSpec> tools;

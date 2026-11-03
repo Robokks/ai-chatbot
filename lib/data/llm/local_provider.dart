@@ -162,7 +162,7 @@ class LocalProvider extends LlmProvider {
           sub = engine
               .create(
                 toLlamaMessages(request),
-                params: const GenerationParams(maxTokens: 2048),
+                params: GenerationParams(maxTokens: request.maxOutputTokens ?? 2048),
                 tools: request.tools.isEmpty
                     ? null
                     : [

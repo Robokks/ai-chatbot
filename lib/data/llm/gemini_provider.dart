@@ -66,6 +66,7 @@ class GeminiProvider extends LlmProvider {
     }
     return {
       'contents': contents,
+      if (req.maxOutputTokens != null) 'generationConfig': {'maxOutputTokens': req.maxOutputTokens},
       if (req.tools.isNotEmpty)
         'tools': [
           {
