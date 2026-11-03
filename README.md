@@ -1,6 +1,6 @@
 # Chatbot
 
-A clean, Claude-style AI chat app for **Android** and **Windows**, built with Flutter.
+A clean AI chat app for **Windows** and **Android**, built with Flutter.
 Bring your own API key for **Claude, ChatGPT, DeepSeek, Gemini, OpenRouter, Groq**, or any
 OpenAI-compatible server (Ollama, LM Studio, vLLM).
 
@@ -21,8 +21,10 @@ Choose *Runtime → Run all*. After about 15–20 minutes the APK downloads and 
 Google Drive (`MyDrive/Chatbot`). If the repo is private, paste a read-only GitHub token when the
 notebook asks.
 
-These builds are made automatically by GitHub Actions on every push. They are signed with
-Flutter's debug key, which is fine for personal use but not for the Play Store.
+Windows builds are made automatically by GitHub Actions on every push. Android builds are
+currently paused; the latest release retains the previous APKs. Android builds use the permanent
+signing key when the configured signing secrets are available. Keep that key unchanged so updates
+retain existing app data.
 
 ## Features
 
@@ -44,14 +46,19 @@ Flutter's debug key, which is fine for personal use but not for the Play Store.
   or PC through llama.cpp ([llamadart](https://pub.dev/packages/llamadart)), with no internet
   and no API key. See [Offline models](#offline-models).
 - **Chat history** grouped by date, with search, rename and delete. It is stored locally.
-- **Claude-inspired design:** a warm palette, serif greeting, light/dark/system themes, a
-  drawer on phones and a collapsible sidebar on desktop.
+- **Two theme styles:** choose **Cream** or **White / black** in Settings → Appearance.
+  Both support light/dark/system mode and use bundled fonts, including Inter.
+- **Desktop navigation:** Chat, Models, Clients, Tools, Logs and Settings on wide screens.
+  Models, Clients and Logs are placeholders for the Lab Router phases. Phones keep the chat drawer.
+- **Windows roles:** choose Main, Client or Relay on first start, or change the role in Settings.
+  Choosing a role does not start sharing or grant access. Relay forwarding and per-client policy
+  controls are planned work; the role picker alone does not implement them.
 - **Keyboard shortcuts (Windows):** Enter sends, Shift+Enter adds a new line, Ctrl+N starts a
   new chat, Ctrl+, opens settings.
 
 ## Getting started
 
-1. Install [Flutter](https://docs.flutter.dev/get-started/install) 3.47 or later.
+1. Install [Flutter](https://docs.flutter.dev/get-started/install) **3.47.9**, matching CI.
 2. `flutter pub get`
 3. Run it:
    - Android: `flutter run -d android` (device or emulator)
@@ -153,6 +160,33 @@ and A2A run on their own unless you turn on **Ask before each run** for that sou
 Tool use works with Claude, ChatGPT and other OpenAI-compatible APIs, Gemini,
 on-device models (if the model supports tool calling) and models on your home server.
 
+## Share coding agents from another PC
+
+1. On the internet PC, open **Settings → Share this device → Coding agents**.
+2. Install and sign in to Claude Code or Codex on that PC, then use **Check again**.
+3. Enable the agent and add a project folder. Choose whether file edits are allowed.
+4. On the other PC, pair with the host, then open **Settings → Tools → Tools from <host>**.
+5. Ask the agent to work on that project. Approve the request on the client and on the host.
+
+The task goes through stdin to the agent on the host. Progress continues during approval and
+execution; client cancellation stops the run. If the MCP port is unavailable, the host screen shows
+an error while the main chat API can remain available. Read-only uses the agent's permission mode;
+Claude Code plan mode is not a full operating-system sandbox.
+
+## Development checks
+
+Before committing changes, run both commands from the repository folder:
+
+```bash
+flutter analyze
+flutter test
+```
+
+Analysis must report **No issues found!** and all tests must pass. Navigation widget tests cover
+1400px desktop and 400px phone windows; additional tests cover saved themes and Windows roles.
+The native Windows build is checked by GitHub Actions. Lab Router implementation status and
+remaining phases are described in [the plan](docs/LAB_ROUTER_PLAN.md).
+
 ## Building releases
 
 ```bash
@@ -161,11 +195,9 @@ flutter build appbundle --release  # Play Store
 flutter build windows --release    # build/windows/x64/runner/Release/ (run on Windows)
 ```
 
-The **Build** GitHub Actions workflow runs analyze and the tests, then uploads an Android APK
-and a zipped Windows build as artifacts on every push.
-
-Release APKs are signed with the debug key by default. Before publishing, configure your own
-keystore (see [Flutter's Android release guide](https://docs.flutter.dev/deployment/android)).
+The **Build** GitHub Actions workflow runs analyze and the tests, then builds and uploads the
+zipped Windows app. Android builds are paused with `BUILD_ANDROID: 'false'`. When re-enabled,
+they use the permanent signing secrets documented below; never replace an existing signing key.
 
 ## Permanent signing key (one-time setup)
 
