@@ -21,13 +21,14 @@ class ChatApp extends StatelessWidget {
         builder: (context, _) => MaterialApp(
           title: 'Chatbot',
           debugShowCheckedModeBanner: false,
-          theme: buildTheme(Brightness.light),
-          darkTheme: buildTheme(Brightness.dark),
+          theme: buildTheme(Brightness.light, style: state.themeStyle),
+          darkTheme: buildTheme(Brightness.dark, style: state.themeStyle),
           themeMode: state.themeMode,
           // Claude Code / Codex run requests from paired devices pop up on
           // top of whatever screen is open.
           builder: HostController.agentsSupported
-              ? (context, child) => AgentApprovalOverlay(hub: state.host.agents, child: child!)
+              ? (context, child) =>
+                    AgentApprovalOverlay(hub: state.host.agents, child: child!)
               : null,
           routes: {
             '/': (_) => const HomeShell(),

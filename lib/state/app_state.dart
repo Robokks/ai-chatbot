@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../core/storage.dart';
+import '../core/theme.dart';
 import '../data/llm/demo_provider.dart';
 import '../data/llm/llm_provider.dart';
 import '../data/llm/local_provider.dart';
@@ -58,6 +59,7 @@ class AppState extends ChangeNotifier {
   Conversation? current;
 
   ThemeMode themeMode = ThemeMode.system;
+  AppThemeStyle themeStyle = AppThemeStyle.cream;
   String systemPrompt = '';
   ProviderKind provider = ProviderKind.anthropic;
   String model = ProviderKind.anthropic.models.first;
@@ -82,6 +84,8 @@ class AppState extends ChangeNotifier {
     }
     themeMode = ThemeMode.values.asNameMap()[storage.getSetting('theme')] ??
         ThemeMode.system;
+    themeStyle = AppThemeStyle.values.asNameMap()[storage.getSetting('themeStyle')] ??
+        AppThemeStyle.cream;
     systemPrompt = storage.getSetting('systemPrompt') ?? '';
     provider = ProviderKind.values.asNameMap()[storage.getSetting('provider')] ??
         ProviderKind.anthropic;
@@ -202,6 +206,12 @@ class AppState extends ChangeNotifier {
     model = m;
     await storage.setSetting('provider', k.name);
     await storage.setSetting('model', m);
+    notifyListeners();
+  }
+
+  Future<void> setThemeStyle(AppThemeStyle style) async {
+    themeStyle = style;
+    await storage.setSetting('themeStyle', style.name);
     notifyListeners();
   }
 

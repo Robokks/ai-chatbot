@@ -157,6 +157,23 @@ class SettingsScreen extends StatelessWidget {
           const _SectionTitle('Appearance'),
           _Card(
             children: [
+              ListTile(
+                title: const Text('Theme style'),
+                trailing: DropdownButton<AppThemeStyle>(
+                  value: state.themeStyle,
+                  items: const [
+                    DropdownMenuItem(value: AppThemeStyle.cream, child: Text('Cream')),
+                    DropdownMenuItem(value: AppThemeStyle.minimal, child: Text('White / black')),
+                  ],
+                  onChanged: (style) {
+                    if (style != null) state.setThemeStyle(style);
+                  },
+                ),
+              ),
+            ],
+          ),
+          _Card(
+            children: [
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: SizedBox(

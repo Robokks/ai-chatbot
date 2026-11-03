@@ -2,6 +2,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 
+enum AppThemeStyle { cream, minimal }
+
 /// Warm, paper-like palette inspired by the Claude app.
 class Palette {
   const Palette({
@@ -53,12 +55,44 @@ class Palette {
     codeBackground: Color(0xFF1C1B1A),
   );
 
-  static Palette of(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark ? dark : light;
+  static const minimalLight = Palette(
+    background: Colors.white,
+    surface: Colors.white,
+    surfaceHigh: Color(0xFFF5F5F5),
+    sidebar: Color(0xFFFAFAFA),
+    border: Color(0xFFE5E5E5),
+    text: Color(0xFF171717),
+    textMuted: Color(0xFF737373),
+    userBubble: Color(0xFFF5F5F5),
+    codeBackground: Color(0xFFF5F5F5),
+  );
+
+  static const minimalDark = Palette(
+    background: Color(0xFF171717),
+    surface: Color(0xFF202020),
+    surfaceHigh: Color(0xFF303030),
+    sidebar: Color(0xFF141414),
+    border: Color(0xFF404040),
+    text: Color(0xFFFAFAFA),
+    textMuted: Color(0xFFA3A3A3),
+    userBubble: Color(0xFF303030),
+    codeBackground: Color(0xFF202020),
+  );
+
+  static Palette of(BuildContext context) {
+    final theme = Theme.of(context);
+    final minimal =
+        theme.extension<_ThemeStyle>()?.style == AppThemeStyle.minimal;
+    return theme.brightness == Brightness.dark
+        ? (minimal ? minimalDark : dark)
+        : (minimal ? minimalLight : light);
+  }
 }
 
 TextStyle serif(BuildContext context, {double size = 28, FontWeight? weight}) =>
-    GoogleFonts.sourceSerif4(
+    (Theme.of(context).extension<_ThemeStyle>()?.style == AppThemeStyle.minimal
+    ? GoogleFonts.inter
+    : GoogleFonts.sourceSerif4)(
       fontSize: size,
       fontWeight: weight ?? FontWeight.w400,
       color: Palette.of(context).text,
@@ -68,26 +102,35 @@ TextStyle serif(BuildContext context, {double size = 28, FontWeight? weight}) =>
 TextStyle mono({double size = 13, Color? color}) =>
     GoogleFonts.jetBrainsMono(fontSize: size, color: color, height: 1.5);
 
-ThemeData buildTheme(Brightness brightness) {
-  final p = brightness == Brightness.dark ? Palette.dark : Palette.light;
-  final accent = brightness == Brightness.dark ? Palette.accentDark : Palette.accent;
-  final scheme = ColorScheme.fromSeed(
-    seedColor: accent,
-    brightness: brightness,
-  ).copyWith(
-    primary: accent,
-    onPrimary: Colors.white,
-    surface: p.background,
-    onSurface: p.text,
-    onSurfaceVariant: p.textMuted,
-    surfaceContainerLowest: p.surface,
-    surfaceContainerLow: p.sidebar,
-    surfaceContainer: p.surface,
-    surfaceContainerHigh: p.surfaceHigh,
-    surfaceContainerHighest: p.surfaceHigh,
-    outline: p.border,
-    outlineVariant: p.border,
-  );
+ThemeData buildTheme(
+  Brightness brightness, {
+  AppThemeStyle style = AppThemeStyle.cream,
+}) {
+  final minimal = style == AppThemeStyle.minimal;
+  final p = brightness == Brightness.dark
+      ? (minimal ? Palette.minimalDark : Palette.dark)
+      : (minimal ? Palette.minimalLight : Palette.light);
+  final accent = minimal
+      ? (brightness == Brightness.dark ? Colors.white : Colors.black)
+      : (brightness == Brightness.dark ? Palette.accentDark : Palette.accent);
+  final onAccent = minimal && brightness == Brightness.dark
+      ? Colors.black
+      : Colors.white;
+  final scheme = ColorScheme.fromSeed(seedColor: accent, brightness: brightness)
+      .copyWith(
+        primary: accent,
+        onPrimary: onAccent,
+        surface: p.background,
+        onSurface: p.text,
+        onSurfaceVariant: p.textMuted,
+        surfaceContainerLowest: p.surface,
+        surfaceContainerLow: p.sidebar,
+        surfaceContainer: p.surface,
+        surfaceContainerHigh: p.surfaceHigh,
+        surfaceContainerHighest: p.surfaceHigh,
+        outline: p.border,
+        outlineVariant: p.border,
+      );
 
   final base = ThemeData(
     useMaterial3: true,
@@ -96,10 +139,8 @@ ThemeData buildTheme(Brightness brightness) {
     scaffoldBackgroundColor: p.background,
     splashFactory: InkSparkle.splashFactory,
   );
-  final text = GoogleFonts.interTextTheme(base.textTheme).apply(
-    bodyColor: p.text,
-    displayColor: p.text,
-  );
+  final text = GoogleFonts.interTextTheme(base.textTheme)
+      .apply(bodyColor: p.text, displayColor: p.text);
 
   return base.copyWith(
     textTheme: text.copyWith(
@@ -162,7 +203,7 @@ ThemeData buildTheme(Brightness brightness) {
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         backgroundColor: accent,
-        foregroundColor: Colors.white,
+        foregroundColor: onAccent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       ),
@@ -188,19 +229,38 @@ ThemeData buildTheme(Brightness brightness) {
       textStyle: TextStyle(color: p.background, fontSize: 12),
     ),
     extensions: [
+      _ThemeStyle(style),
       GptMarkdownThemeData(
         brightness: brightness,
         linkColor: accent,
         linkHoverColor: accent.withValues(alpha: 0.8),
         hrLineColor: p.border,
         highlightColor: p.codeBackground,
-        h1: _heading(28, p.text),
-        h2: _heading(23, p.text),
-        h3: _heading(19, p.text),
+        h1: _heading(28, p.text, minimal),
+        h2: _heading(23, p.text, minimal),
+        h3: _heading(19, p.text, minimal),
       ),
     ],
   );
 }
 
-TextStyle _heading(double size, Color color) => GoogleFonts.sourceSerif4(
-    fontSize: size, fontWeight: FontWeight.w600, color: color, height: 1.3);
+TextStyle _heading(double size, Color color, bool minimal) =>
+    (minimal ? GoogleFonts.inter : GoogleFonts.sourceSerif4)(
+      fontSize: size,
+      fontWeight: FontWeight.w600,
+      color: color,
+      height: 1.3,
+    );
+
+class _ThemeStyle extends ThemeExtension<_ThemeStyle> {
+  const _ThemeStyle(this.style);
+  final AppThemeStyle style;
+
+  @override
+  _ThemeStyle copyWith({AppThemeStyle? style}) =>
+      _ThemeStyle(style ?? this.style);
+
+  @override
+  _ThemeStyle lerp(covariant _ThemeStyle? other, double t) =>
+      other == null || t < 0.5 ? this : other;
+}
