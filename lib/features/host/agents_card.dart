@@ -14,6 +14,7 @@ class AgentsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = Palette.of(context);
+    hub.ensureDetected(); // runs after this frame (Future), never during build
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       CardBox(children: [
         for (final a in CodingAgent.values)
@@ -23,7 +24,7 @@ class AgentsCard extends StatelessWidget {
             secondary: const Icon(Icons.terminal_rounded),
             title: Text(a.label),
             subtitle: Text(
-              hub.detecting && !hub.versions.containsKey(a)
+              !hub.versions.containsKey(a)
                   ? 'Looking…'
                   : hub.versions[a] ?? 'Not found on this PC. ${a.installHint}',
               style: TextStyle(color: p.textMuted),

@@ -53,6 +53,12 @@ class AgentHub extends ChangeNotifier implements AgentHost {
 
   bool get trusting => allowAllUntil != null && DateTime.now().isBefore(allowAllUntil!);
 
+  Future<void>? _firstCheck;
+
+  /// Looks for the agents once, on first use (not at app start, so starting
+  /// the app never runs other programs).
+  Future<void> ensureDetected() => _firstCheck ??= Future(refresh);
+
   Future<void> refresh() async {
     detecting = true;
     notifyListeners();
