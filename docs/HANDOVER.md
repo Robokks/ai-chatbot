@@ -65,6 +65,8 @@ Features done:
 
 ## 2. In progress / next steps
 
+> **Big new direction (approved 2026-11-03):** the Windows app becomes a **Lab AI Router**. One Main PC has internet; offline lab PCs and relays get AI through it, with per-PC models, approvals with expiry and limits, block, analytics, a git/pip proxy, Claude Code via Main, LabVIEW (DynasBrain MCP), and a clean white/black UI like FreeLLMAPI. Full plan: **`docs/LAB_ROUTER_PLAN.md`**. The user said "no coding now": wait for their go-ahead, then start at its Phase 0 (which includes §2A below).
+
 ### 2A. Claude Code / Codex from the offline PC: CODE WRITTEN, TESTS NOT RUN YET (do this first)
 
 **Need:** the user has 2 Windows PCs on one LAN. Only one has internet, and Claude Code and Codex are installed there only. From the offline PC they want to use Claude Code and Codex through this app. The plan was approved; it's in the old plan file and summarized here.
