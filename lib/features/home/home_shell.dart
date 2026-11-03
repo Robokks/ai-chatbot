@@ -5,8 +5,10 @@ import '../../core/theme.dart';
 import '../../state/app_state.dart';
 import '../chat/chat_screen.dart';
 import '../sidebar/sidebar.dart';
+import '../settings/settings_screen.dart';
+import '../tools/tools_screen.dart';
 
-/// Drawer layout on phones, persistent collapsible sidebar on wide screens.
+/// Conversation drawer on phones, app menu and chat history on wide screens.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -16,7 +18,24 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
-  bool _sidebarOpen = true;
+  int _selectedPage = 0;
+
+  static const _pages = [
+    'Chat',
+    'Models',
+    'Clients',
+    'Tools',
+    'Logs',
+    'Settings',
+  ];
+  static const _icons = [
+    Icons.chat_bubble_outline,
+    Icons.grid_view_outlined,
+    Icons.people_outline,
+    Icons.build_outlined,
+    Icons.article_outlined,
+    Icons.settings_outlined,
+  ];
 
   static const _wideBreakpoint = 900.0;
   static const _sidebarWidth = 288.0;
@@ -30,30 +49,65 @@ class _HomeShellState extends State<HomeShell> {
     if (wide) {
       content = Row(
         children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            width: _sidebarOpen ? _sidebarWidth : 0,
-            child: ClipRect(
-              child: OverflowBox(
-                alignment: Alignment.centerLeft,
-                minWidth: _sidebarWidth,
-                maxWidth: _sidebarWidth,
-                child: Sidebar(onCollapse: () => setState(() => _sidebarOpen = false)),
+          SizedBox(
+            width: _sidebarWidth,
+            child: Material(
+              color: Palette.of(context).sidebar,
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        key: const ValueKey('desktop-menu'),
+                        children: [
+                          for (var i = 0; i < _pages.length; i++)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 2),
+                              child: ListTile(
+                                leading: Icon(_icons[i]),
+                                title: Text(_pages[i]),
+                                selected: _selectedPage == i,
+                                selectedColor: Theme.of(context)
+                                    .colorScheme
+                                    .onPrimary,
+                                selectedTileColor: Theme.of(context)
+                                    .colorScheme
+                                    .primary,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                onTap: () => setState(() => _selectedPage = i),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const Divider(),
+                    if (_selectedPage == 0)
+                      Expanded(
+                        child: Sidebar(
+                          onNavigate: () => setState(() => _selectedPage = 0),
+                        ),
+                      )
+                    else
+                      const Spacer(),
+                  ],
+                ),
               ),
             ),
           ),
-          if (_sidebarOpen) VerticalDivider(width: 1, color: Palette.of(context).border),
+          VerticalDivider(width: 1, color: Palette.of(context).border),
           Expanded(
-            child: ChatScreen(
-              leading: _sidebarOpen
-                  ? const SizedBox(width: 48)
-                  : IconButton(
-                      tooltip: 'Open sidebar',
-                      onPressed: () => setState(() => _sidebarOpen = true),
-                      icon: const Icon(Icons.view_sidebar_outlined),
-                    ),
-            ),
+            child: switch (_selectedPage) {
+              0 => const ChatScreen(),
+              3 => const ToolsScreen(),
+              5 => const SettingsScreen(),
+              _ => Scaffold(
+                appBar: AppBar(title: Text(_pages[_selectedPage])),
+                body: const Center(child: Text('Coming soon')),
+              ),
+            },
           ),
         ],
       );
@@ -69,8 +123,10 @@ class _HomeShellState extends State<HomeShell> {
 
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyN, control: true): state.newChat,
-        const SingleActivator(LogicalKeyboardKey.keyN, meta: true): state.newChat,
+        const SingleActivator(LogicalKeyboardKey.keyN, control: true):
+            state.newChat,
+        const SingleActivator(LogicalKeyboardKey.keyN, meta: true):
+            state.newChat,
         const SingleActivator(LogicalKeyboardKey.comma, control: true): () =>
             Navigator.of(context).pushNamed('/settings'),
       },
