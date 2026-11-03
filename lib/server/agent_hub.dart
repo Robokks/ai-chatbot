@@ -48,10 +48,13 @@ class AgentHub extends ChangeNotifier implements AgentHost {
   AgentSettings get agentSettings => settings;
 
   @override
-  Set<CodingAgent> get availableAgents =>
-      {for (final a in settings.enabled) if (versions[a] != null) a};
+  Set<CodingAgent> get availableAgents => {
+    for (final a in settings.enabled)
+      if (versions[a] != null) a,
+  };
 
-  bool get trusting => allowAllUntil != null && DateTime.now().isBefore(allowAllUntil!);
+  bool get trusting =>
+      allowAllUntil != null && DateTime.now().isBefore(allowAllUntil!);
 
   Future<void>? _firstCheck;
 
@@ -81,8 +84,12 @@ class AgentHub extends ChangeNotifier implements AgentHost {
 
   Future<void> addFolder(String path) {
     if (settings.folders.any((f) => f.path == path)) return Future.value();
-    settings.folders.add(AgentFolder(
-        path: path, label: AgentFolder.labelFor(path, settings.folders.map((f) => f.label))));
+    settings.folders.add(
+      AgentFolder(
+        path: path,
+        label: AgentFolder.labelFor(path, settings.folders.map((f) => f.label)),
+      ),
+    );
     return _persist();
   }
 
@@ -125,7 +132,10 @@ class AgentHub extends ChangeNotifier implements AgentHost {
     if (trusting) return true;
     pending.add(a);
     notifyListeners();
-    final allowed = await a.result.timeout(approvalTimeout, onTimeout: () => false);
+    final allowed = await a.result.timeout(
+      approvalTimeout,
+      onTimeout: () => false,
+    );
     if (!a.decided) a.decide(false);
     if (pending.remove(a)) notifyListeners();
     return allowed;
@@ -138,27 +148,61 @@ class AgentHub extends ChangeNotifier implements AgentHost {
     String task, {
     required String device,
     bool continueLast = false,
+    Future<void>? cancel,
     void Function(Duration elapsed, String lastLine)? onProgress,
   }) async {
     final what = '${agent.label} · ${folder.label}';
     final approval = HostApproval(
-        device: device, agent: agent, folder: folder.label, task: task, canEdit: folder.canEdit);
-    if (!await _approve(approval)) {
+      device: device,
+      agent: agent,
+      folder: folder.label,
+      task: task,
+      canEdit: folder.canEdit,
+    );
+    var cancelled = false;
+    cancel?.then((_) {
+      cancelled = true;
+      approval.decide(false);
+    });
+    final waiting = Stopwatch()..start();
+    final ticker = Timer.periodic(
+      progressEvery,
+      (_) => onProgress?.call(
+        waiting.elapsed,
+        'Waiting for approval on the host…',
+      ),
+    );
+    final bool allowed;
+    try {
+      allowed = await _approve(approval);
+    } finally {
+      ticker.cancel();
+    }
+    if (cancelled) {
+      return const ToolOutput('Cancelled by the client.', isError: true);
+    }
+    if (!allowed) {
       log?.call(device, what, 'denied');
       return const ToolOutput(
-          'The user on the host did not allow this run (denied, or no answer within 2 minutes).',
-          isError: true);
+        'The user on the host did not allow this run (denied, or no answer within 2 minutes).',
+        isError: true,
+      );
     }
     running++;
     notifyListeners();
     try {
       final out = await runAgent(
         executable: agent.program,
-        args: agentArgs(agent, canEdit: folder.canEdit, continueLast: continueLast && agent.canContinue),
+        args: agentArgs(
+          agent,
+          canEdit: folder.canEdit,
+          continueLast: continueLast && agent.canContinue,
+        ),
         workingDirectory: folder.path,
         task: task,
         launcher: launcher,
         timeout: runTimeout,
+        cancel: cancel,
         progressEvery: progressEvery,
         onProgress: onProgress,
       );

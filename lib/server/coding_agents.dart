@@ -22,9 +22,9 @@ enum CodingAgent {
 
   /// How to install it, shown when it isn't found.
   String get installHint => switch (this) {
-        CodingAgent.claudeCode => 'Install: npm install -g @anthropic-ai/claude-code, then run "claude" once to sign in.',
-        CodingAgent.codex => 'Install: npm install -g @openai/codex, then run "codex" once to sign in.',
-      };
+    CodingAgent.claudeCode => 'Install: npm install -g @anthropic-ai/claude-code, then run "claude" once to sign in.',
+    CodingAgent.codex => 'Install: npm install -g @openai/codex, then run "codex" once to sign in.',
+  };
 
   /// Can continue the last conversation in the folder.
   bool get canContinue => this == CodingAgent.claudeCode;
@@ -40,17 +40,23 @@ class AgentFolder {
   /// Agents may change files here (otherwise read only).
   bool canEdit;
 
-  Map<String, dynamic> toJson() => {'path': path, 'label': label, 'canEdit': canEdit};
+  Map<String, dynamic> toJson() => {
+    'path': path,
+    'label': label,
+    'canEdit': canEdit,
+  };
 
   factory AgentFolder.fromJson(Map<String, dynamic> j) => AgentFolder(
-        path: j['path'] as String,
-        label: j['label'] as String,
-        canEdit: j['canEdit'] as bool? ?? false,
-      );
+    path: j['path'] as String,
+    label: j['label'] as String,
+    canEdit: j['canEdit'] as bool? ?? false,
+  );
 
   /// A short unique label from the folder name.
   static String labelFor(String path, Iterable<String> taken) {
-    var base = path.split(RegExp(r'[/\\]')).where((s) => s.isNotEmpty).lastOrNull ?? 'project';
+    var base =
+        path.split(RegExp(r'[/\\]')).where((s) => s.isNotEmpty).lastOrNull ??
+        'project';
     base = base.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '-');
     if (base.isEmpty) base = 'project';
     var label = base;
@@ -64,25 +70,27 @@ class AgentFolder {
 /// Saved coding-agent settings (setting `host.agents`).
 class AgentSettings {
   AgentSettings({Set<CodingAgent>? enabled, List<AgentFolder>? folders})
-      : enabled = enabled ?? {},
-        folders = folders ?? [];
+    : enabled = enabled ?? {},
+      folders = folders ?? [];
 
   final Set<CodingAgent> enabled;
   final List<AgentFolder> folders;
 
-  AgentFolder? folder(String label) => folders.where((f) => f.label == label).firstOrNull;
+  AgentFolder? folder(String label) =>
+      folders.where((f) => f.label == label).firstOrNull;
 
   String toJson() => jsonEncode({
-        'enabled': [for (final a in enabled) a.name],
-        'folders': [for (final f in folders) f.toJson()],
-      });
+    'enabled': [for (final a in enabled) a.name],
+    'folders': [for (final f in folders) f.toJson()],
+  });
 
   factory AgentSettings.fromJson(String? raw) {
     if (raw == null) return AgentSettings();
     final j = jsonDecode(raw) as Map<String, dynamic>;
     return AgentSettings(
       enabled: {
-        for (final n in (j['enabled'] as List? ?? const [])) ?CodingAgent.values.asNameMap()[n],
+        for (final n in (j['enabled'] as List? ?? const []))
+          ?CodingAgent.values.asNameMap()[n],
       },
       folders: [
         for (final f in (j['folders'] as List? ?? const []))
@@ -96,38 +104,55 @@ class AgentSettings {
 /// goes in through stdin and the folder is the working directory, so nothing
 /// from another device can turn into shell code (Windows runs the npm `.cmd`
 /// shims through cmd.exe).
-List<String> agentArgs(CodingAgent agent, {required bool canEdit, bool continueLast = false}) =>
-    switch (agent) {
-      CodingAgent.claudeCode => [
-          '-p',
-          '--output-format',
-          'text',
-          '--permission-mode',
-          canEdit ? 'acceptEdits' : 'plan',
-          if (continueLast) '--continue',
-        ],
-      CodingAgent.codex => [
-          'exec',
-          '--skip-git-repo-check',
-          '--sandbox',
-          canEdit ? 'workspace-write' : 'read-only',
-        ],
-    };
+List<String> agentArgs(
+  CodingAgent agent, {
+  required bool canEdit,
+  bool continueLast = false,
+}) => switch (agent) {
+  CodingAgent.claudeCode => [
+    '-p',
+    '--output-format',
+    'text',
+    '--permission-mode',
+    canEdit ? 'acceptEdits' : 'plan',
+    if (continueLast) '--continue',
+  ],
+  CodingAgent.codex => [
+    'exec',
+    '--skip-git-repo-check',
+    '--sandbox',
+    canEdit ? 'workspace-write' : 'read-only',
+  ],
+};
 
 /// Starts a program; replaced in tests.
 typedef AgentLauncher = Future<Process> Function(
-    String executable, List<String> args, String workingDirectory);
+  String executable,
+  List<String> args,
+  String workingDirectory,
+);
 
-Future<Process> defaultLauncher(String executable, List<String> args, String workingDirectory) =>
-    Process.start(executable, args,
-        workingDirectory: workingDirectory, runInShell: Platform.isWindows);
+Future<Process> defaultLauncher(
+  String executable,
+  List<String> args,
+  String workingDirectory,
+) => Process.start(
+  executable,
+  args,
+  workingDirectory: workingDirectory,
+  runInShell: Platform.isWindows,
+);
 
 /// Finds [agent] on this PC and returns its version, or null.
 Future<String?> detectAgent(CodingAgent agent) async {
   try {
-    final r = await Process.run(agent.program, ['--version'],
-            runInShell: Platform.isWindows, stdoutEncoding: utf8, stderrEncoding: utf8)
-        .timeout(const Duration(seconds: 20));
+    final r = await Process.run(
+      agent.program,
+      ['--version'],
+      runInShell: Platform.isWindows,
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    ).timeout(const Duration(seconds: 20));
     if (r.exitCode != 0) return null;
     final v = '${r.stdout}'.trim().split('\n').first.trim();
     return v.isEmpty ? 'installed' : v;
@@ -145,18 +170,31 @@ Future<ToolOutput> runAgent({
   required String task,
   AgentLauncher launcher = defaultLauncher,
   Duration timeout = const Duration(minutes: 20),
+  Future<void>? cancel,
   Duration progressEvery = const Duration(seconds: 15),
   void Function(Duration elapsed, String lastLine)? onProgress,
   int maxChars = 100000,
 }) async {
+  var cancelled = false;
+  cancel?.then((_) => cancelled = true);
   if (!Directory(workingDirectory).existsSync()) {
-    return ToolOutput('The folder "$workingDirectory" no longer exists on the host.', isError: true);
+    return ToolOutput(
+      'The folder "$workingDirectory" no longer exists on the host.',
+      isError: true,
+    );
   }
   final Process process;
   try {
     process = await launcher(executable, args, workingDirectory);
   } on ProcessException catch (e) {
-    return ToolOutput('Could not start "$executable" on the host: ${e.message}', isError: true);
+    return ToolOutput(
+      'Could not start "$executable" on the host: ${e.message}',
+      isError: true,
+    );
+  }
+  if (cancelled) {
+    process.kill();
+    return const ToolOutput('Cancelled by the client.', isError: true);
   }
   final out = StringBuffer();
   final err = StringBuffer();
@@ -167,8 +205,12 @@ Future<ToolOutput> runAgent({
     if (lines.isNotEmpty) lastLine = lines.last;
   }
 
-  final outDone = process.stdout.transform(utf8.decoder).forEach((s) => add(out, s));
-  final errDone = process.stderr.transform(utf8.decoder).forEach((s) => add(err, s));
+  final outDone = process.stdout
+      .transform(utf8.decoder)
+      .forEach((s) => add(out, s));
+  final errDone = process.stderr
+      .transform(utf8.decoder)
+      .forEach((s) => add(err, s));
   try {
     process.stdin.write(task);
     await process.stdin.flush();
@@ -177,33 +219,66 @@ Future<ToolOutput> runAgent({
     // The program may exit before reading stdin; its output says why.
   }
   final clock = Stopwatch()..start();
-  final ticker = Timer.periodic(progressEvery, (_) => onProgress?.call(clock.elapsed, lastLine));
+  final ticker = Timer.periodic(
+    progressEvery,
+    (_) => onProgress?.call(clock.elapsed, lastLine),
+  );
   int code;
   var timedOut = false;
+  var finished = false;
   try {
-    code = await process.exitCode.timeout(timeout);
+    code = await Future.any([
+      process.exitCode,
+      if (cancel != null)
+        cancel.then((_) async {
+          if (finished) return -1;
+          cancelled = true;
+          if (Platform.isWindows) {
+            await Process.run('taskkill', [
+              '/PID',
+              '${process.pid}',
+              '/T',
+              '/F',
+            ]);
+          }
+          process.kill();
+          return -1;
+        }),
+    ]).timeout(timeout);
   } on TimeoutException {
     timedOut = true;
     process.kill();
     code = -1;
   } finally {
+    finished = true;
     ticker.cancel();
   }
-  await Future.wait([outDone, errDone]).timeout(const Duration(seconds: 5), onTimeout: () => []);
+  if (cancelled) {
+    return const ToolOutput('Cancelled by the client.', isError: true);
+  }
+  await Future.wait([outDone, errDone])
+      .timeout(const Duration(seconds: 5), onTimeout: () => []);
   if (timedOut) {
     return ToolOutput(
-        clip('Stopped after ${timeout.inMinutes} minutes.\n${out.toString().trim()}'),
-        isError: true);
+      clip(
+        'Stopped after ${timeout.inMinutes} minutes.\n${out.toString().trim()}',
+      ),
+      isError: true,
+    );
   }
   final text = out.toString().trim();
   if (code != 0) {
     return ToolOutput(
-        clip([
+      clip(
+        [
           'Exit code: $code',
           if (text.isNotEmpty) text,
-          if (err.toString().trim().isNotEmpty) 'Errors:\n${err.toString().trim()}',
-        ].join('\n')),
-        isError: true);
+          if (err.toString().trim().isNotEmpty)
+            'Errors:\n${err.toString().trim()}',
+        ].join('\n'),
+      ),
+      isError: true,
+    );
   }
   return ToolOutput(clip(text.isEmpty ? '(no output)' : text, maxChars));
 }

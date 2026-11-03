@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:ai_chatbot/core/storage.dart';
@@ -15,28 +16,59 @@ import 'tools_test.dart' show HostBackendFake;
 /// Stands in for claude / codex: prints its arguments, then the task it
 /// read from stdin.
 Future<Process> echoAgent(String exe, List<String> args, String cwd) =>
-    Process.start('sh', ['-c', r'echo "$0 $*"; cat', exe, ...args], workingDirectory: cwd);
+    Process.start('sh', [
+      '-c',
+      r'echo "$0 $*"; cat',
+      exe,
+      ...args,
+    ], workingDirectory: cwd);
 
-Future<Process> slowAgent(String exe, List<String> args, String cwd) => Process.start(
-    'sh', ['-c', 'cat > /dev/null; echo step one; sleep 1; echo finished'],
-    workingDirectory: cwd);
+Future<Process> slowAgent(String exe, List<String> args, String cwd) =>
+    Process.start('sh', [
+      '-c',
+      'cat > /dev/null; echo step one; sleep 1; echo finished',
+    ], workingDirectory: cwd);
 
 void main() {
   test('commands are fixed words; the task is never an argument', () {
-    expect(agentArgs(CodingAgent.claudeCode, canEdit: false),
-        ['-p', '--output-format', 'text', '--permission-mode', 'plan']);
-    expect(agentArgs(CodingAgent.claudeCode, canEdit: true, continueLast: true),
-        ['-p', '--output-format', 'text', '--permission-mode', 'acceptEdits', '--continue']);
-    expect(agentArgs(CodingAgent.codex, canEdit: false),
-        ['exec', '--skip-git-repo-check', '--sandbox', 'read-only']);
-    expect(agentArgs(CodingAgent.codex, canEdit: true),
-        ['exec', '--skip-git-repo-check', '--sandbox', 'workspace-write']);
+    expect(agentArgs(CodingAgent.claudeCode, canEdit: false), [
+      '-p',
+      '--output-format',
+      'text',
+      '--permission-mode',
+      'plan',
+    ]);
+    expect(
+      agentArgs(CodingAgent.claudeCode, canEdit: true, continueLast: true),
+      [
+        '-p',
+        '--output-format',
+        'text',
+        '--permission-mode',
+        'acceptEdits',
+        '--continue',
+      ],
+    );
+    expect(agentArgs(CodingAgent.codex, canEdit: false), [
+      'exec',
+      '--skip-git-repo-check',
+      '--sandbox',
+      'read-only',
+    ]);
+    expect(agentArgs(CodingAgent.codex, canEdit: true), [
+      'exec',
+      '--skip-git-repo-check',
+      '--sandbox',
+      'workspace-write',
+    ]);
   });
 
   test('settings save and load; folder labels are unique and safe', () {
     final s = AgentSettings(
       enabled: {CodingAgent.codex},
-      folders: [AgentFolder(path: '/home/me/my app', label: 'my-app', canEdit: true)],
+      folders: [
+        AgentFolder(path: '/home/me/my app', label: 'my-app', canEdit: true),
+      ],
     );
     final back = AgentSettings.fromJson(s.toJson());
     expect(back.enabled, {CodingAgent.codex});
@@ -76,15 +108,23 @@ void main() {
         await hub.setEnabled(CodingAgent.claudeCode, true);
         await hub.addFolder(project.path);
       }
-      host = HostServer(HostBackendFake(),
-          loadDevices: () async => [], saveDevices: (_) async {}, agents: hub);
+      host = HostServer(
+        HostBackendFake(),
+        loadDevices: () async => [],
+        saveDevices: (_) async {},
+        agents: hub,
+      );
       await host.start(port: 0, address: InternetAddress.loopbackIPv4);
       key = (await host.createKey('Offline PC')).key;
       registry = ToolRegistry(await Storage.openAt('${dir.path}/db'));
       await registry.load();
       await registry.addOrUpdate(
         ToolSourceConfig(
-            id: 'h', type: ToolSourceType.mcp, name: 'Internet PC', url: 'http://127.0.0.1:${host.mcpPort}/mcp'),
+          id: 'h',
+          type: ToolSourceType.mcp,
+          name: 'Internet PC',
+          url: 'http://127.0.0.1:${host.mcpPort}/mcp',
+        ),
         secret: key,
       );
       expect(registry.status['h']!.error, isNull);
@@ -117,37 +157,63 @@ void main() {
       expect(agentTool('codex'), isNull);
     });
 
-    test('offered as an ask-first tool; host Allow runs it with the task on stdin', () async {
-      await start();
-      final spec = agentTool('claude_code')!;
-      expect(spec.needsApproval, isTrue);
-      expect(agentTool('codex'), isNull);
-      expect(agentTool('chat')!.needsApproval, isFalse);
+    test(
+      'offered as an ask-first tool; host Allow runs it with the task on stdin',
+      () async {
+        await start();
+        final spec = agentTool('claude_code')!;
+        expect(spec.needsApproval, isTrue);
+        expect(agentTool('codex'), isNull);
+        expect(agentTool('chat')!.needsApproval, isFalse);
 
-      final run = registry.execute(ToolCall(
-          id: '1', name: spec.name, arguments: {'task': 'Explain main.dart; rm -rf / & echo hi', 'folder': 'proj'}));
-      final approval = await waitForApproval();
-      expect(approval.device, 'Offline PC');
-      expect(approval.agent, CodingAgent.claudeCode);
-      expect(approval.canEdit, isFalse);
-      hub.answer(approval, true);
-      final r = await run;
-      expect(r.isError, isFalse, reason: r.text);
-      expect(r.text, contains('claude -p --output-format text --permission-mode plan'));
-      expect(r.text, contains('Explain main.dart; rm -rf / & echo hi'));
-      expect(logged.single, 'Offline PC Claude Code · proj ok');
-    });
+        final run = registry.execute(
+          ToolCall(
+            id: '1',
+            name: spec.name,
+            arguments: {
+              'task': 'Explain main.dart; rm -rf / & echo hi',
+              'folder': 'proj',
+            },
+          ),
+        );
+        final approval = await waitForApproval();
+        expect(approval.device, 'Offline PC');
+        expect(approval.agent, CodingAgent.claudeCode);
+        expect(approval.canEdit, isFalse);
+        hub.answer(approval, true);
+        final r = await run;
+        expect(r.isError, isFalse, reason: r.text);
+        expect(
+          r.text,
+          contains('claude -p --output-format text --permission-mode plan'),
+        );
+        expect(r.text, contains('Explain main.dart; rm -rf / & echo hi'));
+        expect(logged.single, 'Offline PC Claude Code · proj ok');
+      },
+    );
 
     test('Deny, or no answer, is reported to the AI', () async {
       await start(approvalTimeout: const Duration(milliseconds: 300));
       final spec = agentTool('claude_code')!;
-      final run = registry.execute(ToolCall(id: '1', name: spec.name, arguments: {'task': 'x', 'folder': 'proj'}));
+      final run = registry.execute(
+        ToolCall(
+          id: '1',
+          name: spec.name,
+          arguments: {'task': 'x', 'folder': 'proj'},
+        ),
+      );
       hub.answer(await waitForApproval(), false);
       final r = await run;
       expect(r.isError, isTrue);
       expect(r.text, contains('did not allow'));
 
-      final r2 = await registry.execute(ToolCall(id: '2', name: spec.name, arguments: {'task': 'y', 'folder': 'proj'}));
+      final r2 = await registry.execute(
+        ToolCall(
+          id: '2',
+          name: spec.name,
+          arguments: {'task': 'y', 'folder': 'proj'},
+        ),
+      );
       expect(r2.isError, isTrue);
       expect(hub.pending, isEmpty);
     });
@@ -155,11 +221,22 @@ void main() {
     test('Allow for 30 min skips the next approval', () async {
       await start();
       final spec = agentTool('claude_code')!;
-      final first = registry.execute(ToolCall(id: '1', name: spec.name, arguments: {'task': 'a', 'folder': 'proj'}));
+      final first = registry.execute(
+        ToolCall(
+          id: '1',
+          name: spec.name,
+          arguments: {'task': 'a', 'folder': 'proj'},
+        ),
+      );
       hub.answer(await waitForApproval(), true, trustMinutes: 30);
       expect((await first).isError, isFalse);
       final second = await registry.execute(
-          ToolCall(id: '2', name: spec.name, arguments: {'task': 'b', 'folder': 'proj', 'continue_last': true}));
+        ToolCall(
+          id: '2',
+          name: spec.name,
+          arguments: {'task': 'b', 'folder': 'proj', 'continue_last': true},
+        ),
+      );
       expect(second.isError, isFalse, reason: second.text);
       expect(second.text, contains('--continue'));
       hub.stopTrusting();
@@ -170,7 +247,12 @@ void main() {
       await start();
       final spec = agentTool('claude_code')!;
       final r = await registry.execute(
-          ToolCall(id: '1', name: spec.name, arguments: {'task': 'x', 'folder': '../etc'}));
+        ToolCall(
+          id: '1',
+          name: spec.name,
+          arguments: {'task': 'x', 'folder': '../etc'},
+        ),
+      );
       expect(r.isError, isTrue);
       expect(hub.pending, isEmpty);
     });
@@ -180,7 +262,11 @@ void main() {
       final spec = agentTool('claude_code')!;
       final progress = <String>[];
       final run = registry.execute(
-        ToolCall(id: '1', name: spec.name, arguments: {'task': 'x', 'folder': 'proj'}),
+        ToolCall(
+          id: '1',
+          name: spec.name,
+          arguments: {'task': 'x', 'folder': 'proj'},
+        ),
         onProgress: progress.add,
       );
       hub.answer(await waitForApproval(), true);
@@ -192,11 +278,44 @@ void main() {
       expect(progress.any((p) => p.contains('step one')), isTrue);
     });
 
+    test('progress continues after a long approval wait', () async {
+      await start(launcher: slowAgent);
+      final progress = <String>[];
+      final run = registry.execute(
+        ToolCall(
+          id: 'late',
+          name: agentTool('claude_code')!.name,
+          arguments: {'task': 'x', 'folder': 'proj'},
+        ),
+        onProgress: progress.add,
+      );
+      final approval = await waitForApproval();
+      await Future<void>.delayed(const Duration(milliseconds: 850));
+      expect(progress.any((p) => p.contains('Waiting for approval')), isTrue);
+      final before = progress.length;
+      hub.answer(approval, true);
+      expect((await run).isError, isFalse);
+      expect(
+        progress.skip(before).any((p) => p.contains('is working')),
+        isTrue,
+      );
+    });
+
     test('a failing agent returns its exit code and errors', () async {
       await start(
-          launcher: (e, a, c) => Process.start('sh', ['-c', 'cat >/dev/null; echo "not signed in" >&2; exit 3']));
+        launcher: (e, a, c) => Process.start('sh', [
+          '-c',
+          'cat >/dev/null; echo "not signed in" >&2; exit 3',
+        ]),
+      );
       final spec = agentTool('claude_code')!;
-      final run = registry.execute(ToolCall(id: '1', name: spec.name, arguments: {'task': 'x', 'folder': 'proj'}));
+      final run = registry.execute(
+        ToolCall(
+          id: '1',
+          name: spec.name,
+          arguments: {'task': 'x', 'folder': 'proj'},
+        ),
+      );
       hub.answer(await waitForApproval(), true);
       final r = await run;
       expect(r.isError, isTrue);
@@ -207,15 +326,70 @@ void main() {
 
   test('a missing folder or program gives a clear error', () async {
     final missing = await runAgent(
-        executable: 'claude', args: const [], workingDirectory: '/no/such/dir', task: 'x');
+      executable: 'claude',
+      args: const [],
+      workingDirectory: '/no/such/dir',
+      task: 'x',
+    );
     expect(missing.text, contains('no longer exists'));
     final noProgram = await runAgent(
-        executable: 'definitely-not-installed-xyz',
-        args: const [],
-        workingDirectory: Directory.systemTemp.path,
-        task: 'x',
-        launcher: (e, a, c) => Process.start(e, a, workingDirectory: c));
+      executable: 'definitely-not-installed-xyz',
+      args: const [],
+      workingDirectory: Directory.systemTemp.path,
+      task: 'x',
+      launcher: (e, a, c) => Process.start(e, a, workingDirectory: c),
+    );
     expect(noProgram.isError, isTrue);
     expect(noProgram.text, contains('Could not start'));
+  });
+  test('cancel stops a running agent promptly', () async {
+    final cancel = Completer<void>();
+    final started = Completer<void>();
+    final run = runAgent(
+      executable: 'unused',
+      args: [],
+      workingDirectory: Directory.systemTemp.path,
+      task: 'x',
+      cancel: cancel.future,
+      launcher: (e, a, c) async {
+        final p = await Process.start('sh', [
+          '-c',
+          'cat >/dev/null; exec sleep 30',
+        ]);
+        started.complete();
+        return p;
+      },
+    );
+    await started.future;
+    cancel.complete();
+    final result = await run.timeout(const Duration(seconds: 2));
+    expect(result.isError, isTrue);
+    expect(result.text, contains('Cancelled'));
+  });
+
+  test('cancel removes a pending approval without launching', () async {
+    final cancel = Completer<void>();
+    var launches = 0;
+    final hub = AgentHub(
+      load: () => null,
+      save: (_) async {},
+      launcher: (e, a, c) async {
+        launches++;
+        throw StateError('must not run');
+      },
+    );
+    final run = hub.runAgentTask(
+      CodingAgent.codex,
+      AgentFolder(path: Directory.systemTemp.path, label: 'tmp'),
+      'x',
+      device: 'Client',
+      cancel: cancel.future,
+    );
+    expect(hub.pending, hasLength(1));
+    cancel.complete();
+    expect((await run).text, contains('Cancelled'));
+    expect(hub.pending, isEmpty);
+    expect(launches, 0);
+    hub.dispose();
   });
 }

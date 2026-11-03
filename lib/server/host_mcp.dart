@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -10,7 +11,10 @@ import 'openai_bridge.dart';
 
 /// Runs one prompt on a shared model and returns the full answer.
 typedef RunPrompt = Future<(String text, String model)> Function(
-    String? model, String prompt, String? system);
+  String? model,
+  String prompt,
+  String? system,
+);
 
 /// Runs coding agents (Claude Code, Codex) for paired devices, after the
 /// host user approves each run.
@@ -26,6 +30,7 @@ abstract class AgentHost {
     String task, {
     required String device,
     bool continueLast = false,
+    Future<void>? cancel,
     void Function(Duration elapsed, String lastLine)? onProgress,
   });
 }
@@ -66,28 +71,37 @@ class HostMcpServer {
       'list_models',
       description: 'List the AI models shared by ${hostName()}.',
       inputSchema: JsonSchema.object(properties: {}),
-      callback: (args, extra) async => CallToolResult(content: [
-        TextContent(
-          text: jsonEncode([
-            for (final m in models())
-              {
-                'id': m.id,
-                'name': m.displayName ?? m.model,
-                'runs_on': m.kind == ProviderKind.local ? 'this device' : m.kind.label,
-              },
-          ]),
-        ),
-      ]),
+      callback: (args, extra) async => CallToolResult(
+        content: [
+          TextContent(
+            text: jsonEncode([
+              for (final m in models())
+                {
+                  'id': m.id,
+                  'name': m.displayName ?? m.model,
+                  'runs_on': m.kind == ProviderKind.local
+                      ? 'this device'
+                      : m.kind.label,
+                },
+            ]),
+          ),
+        ],
+      ),
     );
     server.registerTool(
       'chat',
-      description: 'Ask an AI model on ${hostName()} and get its answer. '
+      description:
+          'Ask an AI model on ${hostName()} and get its answer. '
           'Use list_models to see model ids.',
       inputSchema: JsonSchema.object(
         properties: {
-          'prompt': JsonSchema.string(description: 'The question or instruction'),
+          'prompt': JsonSchema.string(
+            description: 'The question or instruction',
+          ),
           'model': JsonSchema.string(
-              description: 'Model id from list_models; defaults to the first shared model'),
+            description:
+                'Model id from list_models; defaults to the first shared model',
+          ),
           'system': JsonSchema.string(description: 'Optional system prompt'),
         },
         required: ['prompt'],
@@ -99,9 +113,15 @@ class HostMcpServer {
             args['prompt'] as String,
             args['system'] as String?,
           );
-          return CallToolResult(content: [TextContent(text: text)], meta: {'model': model});
+          return CallToolResult(
+            content: [TextContent(text: text)],
+            meta: {'model': model},
+          );
         } catch (e) {
-          return CallToolResult(content: [TextContent(text: 'Error: $e')], isError: true);
+          return CallToolResult(
+            content: [TextContent(text: 'Error: $e')],
+            isError: true,
+          );
         }
       },
     );
@@ -117,25 +137,31 @@ class HostMcpServer {
     if (settings.folders.isEmpty) return;
     for (final agent in host.availableAgents) {
       final folders = [
-        for (final f in settings.folders) '"${f.label}" (${f.canEdit ? 'can edit files' : 'read only'})',
+        for (final f in settings.folders)
+          '"${f.label}" (${f.canEdit ? 'can edit files' : 'read only'})',
       ].join(', ');
       server.registerTool(
         agent.toolName,
-        description: 'Give a coding task to ${agent.fullName}, running on ${hostName()} in one of '
+        description:
+            'Give a coding task to ${agent.fullName}, running on ${hostName()} in one of '
             'its project folders: $folders. It reads the code, can run checks and, in '
             'folders that allow it, edit files, then answers with what it found or did. '
             'Describe the task fully; it cannot see this chat. The user on '
             '${hostName()} approves each run. Runs can take several minutes.',
         inputSchema: JsonSchema.object(
           properties: {
-            'task': JsonSchema.string(description: 'The full task or question for the agent'),
+            'task': JsonSchema.string(
+              description: 'The full task or question for the agent',
+            ),
             'folder': JsonSchema.string(
               description: 'Project folder label',
               enumValues: [for (final f in settings.folders) f.label],
             ),
             if (agent.canContinue)
               'continue_last': JsonSchema.boolean(
-                  description: 'Continue the previous ${agent.label} conversation in this folder'),
+                description:
+                    'Continue the previous ${agent.label} conversation in this folder',
+              ),
           },
           required: ['task', 'folder'],
         ),
@@ -145,33 +171,66 @@ class HostMcpServer {
           final task = '${args['task'] ?? ''}'.trim();
           if (folder == null) {
             return CallToolResult(
-                content: [TextContent(text: 'Unknown folder "${args['folder']}". Use one of: $folders')],
-                isError: true);
+              content: [
+                TextContent(
+                  text:
+                      'Unknown folder "${args['folder']}". Use one of: $folders',
+                ),
+              ],
+              isError: true,
+            );
           }
           if (task.isEmpty) {
-            return CallToolResult(content: [const TextContent(text: '"task" is required')], isError: true);
+            return CallToolResult(
+              content: [const TextContent(text: '"task" is required')],
+              isError: true,
+            );
           }
           if (!host.availableAgents.contains(agent)) {
             return CallToolResult(
-                content: [TextContent(text: '${agent.label} is not shared by ${hostName()} any more.')],
-                isError: true);
+              content: [
+                TextContent(
+                  text:
+                      '${agent.label} is not shared by ${hostName()} any more.',
+                ),
+              ],
+              isError: true,
+            );
           }
-          final out = await host.runAgentTask(
-            agent,
-            folder,
-            task,
-            device: deviceName,
-            continueLast: args['continue_last'] == true,
-            onProgress: (elapsed, line) {
-              final m = elapsed.inMinutes, sec = elapsed.inSeconds % 60;
-              extra
-                  .sendProgress(elapsed.inSeconds.toDouble(),
-                      message: '${agent.label} is working… ${m > 0 ? '${m}m ' : ''}${sec}s'
-                          '${line.isEmpty ? '' : ' · ${line.length > 80 ? '${line.substring(0, 80)}…' : line}'}')
-                  .catchError((_) {});
-            },
-          );
-          return CallToolResult(content: [TextContent(text: out.text)], isError: out.isError);
+          var progress = 0;
+          final cancelled = Completer<void>();
+          final subscription = extra.signal.onAbort.listen((_) {
+            if (!cancelled.isCompleted) cancelled.complete();
+          });
+          if (extra.signal.aborted && !cancelled.isCompleted) cancelled.complete();
+          try {
+            final out = await host.runAgentTask(
+              agent,
+              folder,
+              task,
+              device: deviceName,
+              continueLast: args['continue_last'] == true,
+              cancel: cancelled.future,
+              onProgress: (elapsed, line) {
+                final m = elapsed.inMinutes, sec = elapsed.inSeconds % 60;
+                extra
+                    .sendProgress(
+                      (++progress).toDouble(),
+                      message: line.startsWith('Waiting for approval')
+                          ? line
+                          : '${agent.label} is working… ${m > 0 ? '${m}m ' : ''}${sec}s'
+                                '${line.isEmpty ? '' : ' · ${line.length > 80 ? '${line.substring(0, 80)}…' : line}'}',
+                    )
+                    .catchError((_) {});
+              },
+            );
+            return CallToolResult(
+              content: [TextContent(text: out.text)],
+              isError: out.isError,
+            );
+          } finally {
+            await subscription.cancel();
+          }
         },
       );
     }
