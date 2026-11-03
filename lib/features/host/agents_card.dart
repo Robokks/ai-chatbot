@@ -8,14 +8,16 @@ import 'widgets.dart';
 
 /// Host screen card: share Claude Code / Codex and pick their folders.
 class AgentsCard extends StatelessWidget {
-  const AgentsCard({super.key, required this.hub});
+  const AgentsCard({super.key, required this.hub, this.error});
   final AgentHub hub;
+  final String? error;
 
   @override
   Widget build(BuildContext context) {
     final p = Palette.of(context);
     hub.ensureDetected(); // runs after this frame (Future), never during build
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (error != null) NoteBox(icon: Icons.error_outline, text: error!),
       CardBox(children: [
         for (final a in CodingAgent.values)
           SwitchListTile(
@@ -59,7 +61,7 @@ class AgentsCard extends StatelessWidget {
                 value: f.canEdit,
                 underline: const SizedBox.shrink(),
                 items: const [
-                  DropdownMenuItem(value: false, child: Text('Read only')),
+                  DropdownMenuItem(value: false, child: Text('Read only (no file edits)')),
                   DropdownMenuItem(value: true, child: Text('Can edit files')),
                 ],
                 onChanged: (v) => hub.setCanEdit(f, v ?? false),
@@ -84,6 +86,8 @@ class AgentsCard extends StatelessWidget {
       NoteBox(
         icon: Icons.verified_user_outlined,
         text: 'Paired devices can ask Claude Code or Codex to work in these folders. '
+            'Read only uses Claude Code plan mode and the Codex read-only sandbox. '
+            'Plan mode is a permission setting, not a full sandbox. '
             'You approve each run here first. Runs use your own Claude / ChatGPT '
             'sign-in on this PC. On the other device, add Settings → Tools → '
             '"Tools from <this PC>" (open it again after changing folders here).'

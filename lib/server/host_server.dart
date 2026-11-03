@@ -94,6 +94,8 @@ class HostServer extends ChangeNotifier {
   static const maxPinAttempts = 5;
 
   HttpServer? _server;
+  Timer? _pinTimer;
+  String? mcpError;
   HostMcpServer? _mcp;
   Future<void> Function()? _stopAdvertising;
   List<PairedDevice> devices = [];
@@ -112,12 +114,11 @@ class HostServer extends ChangeNotifier {
   int? get mcpPort => _mcp?.port;
 
   /// Six-digit pairing code; rotates every 10 minutes and after each pairing.
-  String get pin {
-    if (DateTime.now().difference(_pinCreated) > pinLifetime) newPin();
-    return _pin;
-  }
+  String get pin => _pin;
 
   void newPin() {
+    _pinTimer?.cancel();
+    if (running) _pinTimer = Timer(pinLifetime, newPin);
     _pin = List.generate(6, (_) => _random.nextInt(10)).join();
     _pinCreated = DateTime.now();
     _failedPins = 0;
@@ -139,6 +140,8 @@ class HostServer extends ChangeNotifier {
     newPin();
     _server = await HttpServer.bind(address ?? InternetAddress.anyIPv4, port, shared: true);
     _server!.listen(_handle, onError: (_) {});
+    _pinTimer = Timer(pinLifetime, newPin);
+    mcpError = null;
     if (mcp) {
       final m = _mcp = HostMcpServer(
         hostName: () => backend.deviceName,
@@ -157,8 +160,11 @@ class HostServer extends ChangeNotifier {
       );
       try {
         await m.start(port == 0 ? 0 : port + 1);
-      } catch (_) {
-        _mcp = null; // Port taken: the rest of the server still works.
+      } catch (e) {
+        mcpError = 'Could not start MCP on port ${port == 0 ? 'auto' : port + 1}: $e. '
+            'MCP tools and coding agents are unavailable.';
+        await m.stop();
+        _mcp = null;
       }
     }
     try {
@@ -170,6 +176,8 @@ class HostServer extends ChangeNotifier {
   }
 
   Future<void> stop() async {
+    _pinTimer?.cancel();
+    _pinTimer = null;
     await _mcp?.stop();
     _mcp = null;
     await _stopAdvertising?.call();
@@ -320,6 +328,7 @@ class HostServer extends ChangeNotifier {
       });
     }
     final body = await _readJson(req);
+    if (now.difference(_pinCreated) >= pinLifetime) newPin();
     final name = (body['device'] as String?)?.trim();
     if (body['pin'] is! String || !_constantTimeEquals(body['pin'] as String, pin)) {
       _failedPins++;

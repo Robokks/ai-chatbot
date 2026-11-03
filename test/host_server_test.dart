@@ -195,4 +195,27 @@ void main() {
     expect(SharedModel.parseId('anthropic/claude-x'), (ProviderKind.anthropic, 'claude-x'));
     expect(SharedModel.parseId('nonsense'), isNull);
   });
+  test('reading the pairing PIN does not notify listeners', () {
+    var notices = 0;
+    host.addListener(() => notices++);
+    final pin = host.pin;
+    expect(pin, hasLength(6));
+    expect(host.pin, pin);
+    expect(notices, 0);
+  });
+
+  test('a busy MCP port is reported while the main API remains available', () async {
+    final port = host.port!;
+    await host.stop();
+    final busy = await ServerSocket.bind(InternetAddress.anyIPv4, port + 1);
+    try {
+      await host.start(port: port, address: InternetAddress.loopbackIPv4);
+      expect(host.mcpError, isNotNull);
+      expect(host.mcpPort, isNull);
+      expect((await call('GET', '/health')).$1, 200);
+    } finally {
+      await busy.close();
+    }
+  });
+
 }

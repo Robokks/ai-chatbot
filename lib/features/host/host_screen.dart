@@ -51,6 +51,8 @@ class HostScreen extends StatelessWidget {
                 child: Text(host.error!,
                     style: TextStyle(color: Theme.of(context).colorScheme.error)),
               ),
+            if (host.server.mcpError != null)
+              NoteBox(icon: Icons.error_outline, text: host.server.mcpError!),
             if (running) ...[
               const SectionTitle('Connect a device'),
               _ConnectCard(host: host),
@@ -59,7 +61,7 @@ class HostScreen extends StatelessWidget {
             _SharedModels(host: host, state: state),
             if (HostController.agentsSupported) ...[
               const SectionTitle('Coding agents'),
-              AgentsCard(hub: host.agents),
+              AgentsCard(hub: host.agents, error: host.server.mcpError),
             ],
             if (running) ...[
               const SectionTitle('For other apps'),
