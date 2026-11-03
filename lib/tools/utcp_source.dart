@@ -11,12 +11,14 @@ import 'tool_source.dart';
 /// directly; CLI tools run on a PC when every program they use is on the
 /// user's CLI allowlist.
 class UtcpToolSource extends ToolSource {
-  UtcpToolSource(super.config, super.secret, {required this.allowedPrograms, http.Client? client})
-      : _client = client ?? http.Client();
+  UtcpToolSource(super.config, super.secret, {required this.allowedPrograms, http.Client? client, bool? windows})
+      : _client = client ?? http.Client(), _windows = windows ?? Platform.isWindows;
 
   /// Program names allowed by the user's CLI tools (e.g. "git", "python").
   final Set<String> allowedPrograms;
   final http.Client _client;
+  final bool _windows;
+  String _quote(String value) => _windows ? powershellQuote(value) : shellQuote(value);
   final Map<String, Map<String, dynamic>> _templates = {};
   final Map<String, String> _oauthTokens = {};
 
@@ -189,7 +191,7 @@ class UtcpToolSource extends ToolSource {
             RegExp(r'UTCP_ARG_([A-Za-z0-9_]+)_UTCP_END'),
             (m) {
               final v = args[m[1]];
-              return shellQuote(v == null ? '' : (v is String ? v : jsonEncode(v)));
+              return _quote(v == null ? '' : (v is String ? v : jsonEncode(v)));
             },
           ),
           append: c is Map ? c['append_to_final_output'] as bool? : null,
@@ -200,7 +202,7 @@ class UtcpToolSource extends ToolSource {
         if (c.append ?? i == commands.length - 1) i,
     ];
     final String script;
-    if (Platform.isWindows) {
+    if (_windows) {
       script = [
         for (final (i, c) in commands.indexed) '\$CMD_${i}_OUTPUT = (${c.command} 2>&1 | Out-String)',
         for (final i in finals) 'Write-Output \$CMD_${i}_OUTPUT',
@@ -217,7 +219,7 @@ class UtcpToolSource extends ToolSource {
       ].join('\n');
     }
     if (!desktopCli) return TermuxRunner.instance.run('sh', ['-c', script]);
-    return Platform.isWindows
+    return _windows
         ? runProcess('powershell', ['-NoProfile', '-Command', script],
             workingDirectory: tpl['working_dir'] as String?)
         : runProcess('sh', ['-c', script], workingDirectory: tpl['working_dir'] as String?);
@@ -231,7 +233,7 @@ class UtcpToolSource extends ToolSource {
       for (final c in tpl['commands'] as List)
         (c is Map ? c['command'] as String : '$c').replaceAllMapped(
           RegExp(r'UTCP_ARG_([A-Za-z0-9_]+)_UTCP_END'),
-          (m) => shellQuote('${args[m[1]] ?? ''}'),
+          (m) => _quote('${args[m[1]] ?? ''}'),
         ),
     ].join('\n');
   }

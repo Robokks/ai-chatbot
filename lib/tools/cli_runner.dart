@@ -33,6 +33,9 @@ String shellQuote(String value) => Platform.isWindows
     ? '"${value.replaceAll('"', r'\"')}"'
     : "'${value.replaceAll("'", r"'\''")}'";
 
+/// A literal PowerShell argument, including dollar signs and subexpressions.
+String powershellQuote(String value) => "'${value.replaceAll("'", "''")}'";
+
 Future<ToolOutput> runProcess(
   String executable,
   List<String> args, {
