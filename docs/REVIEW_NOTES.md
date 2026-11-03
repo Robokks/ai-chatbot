@@ -8,7 +8,21 @@ runner if your PC has no Flutter.
 Already fixed: the coding-agent check (`claude --version` / `codex --version`) no longer runs at app
 start. It runs when the host screen opens or the server starts (`AgentHub.ensureDetected`).
 
-## Fix in this order
+## Foundation implementation status (2026-11-03)
+
+Items 1–5 below are now implemented: approval keepalives, cancellation, PowerShell literal
+quoting, visible MCP startup errors and the clarified read-only wording. Progress uses a
+per-call increasing counter so approval and run clocks cannot cause progress to disappear.
+Item 7 is also fixed: PIN rotation uses a timer and the PIN getter does not notify listeners.
+Item 8 is updated in README. The current local checks are clean analysis and 112 passing tests,
+including desktop/phone navigation and saved Windows role selection.
+
+Item 6 remains open: per-client MCP identity and policy enforcement belong to Phase 1. An
+implementation attempt that rewrites the MCP gateway/session handling was blocked by automatic
+approval review pending specific authorization. The unfinished access-control draft is kept
+outside the app checkout; it is not active or claimed complete. Phases 1–3 remain outstanding.
+
+## Original review findings
 
 ### 1. A late "Allow" loses the answer
 - **Where:** `lib/server/agent_hub.dart`, `runAgentTask` → `await _approve(approval)` (about line 146).
