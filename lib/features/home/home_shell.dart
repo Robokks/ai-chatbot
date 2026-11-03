@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../core/theme.dart';
 import '../../state/app_state.dart';
+import '../../data/lab_role.dart';
 import '../chat/chat_screen.dart';
 import '../sidebar/sidebar.dart';
 import '../settings/settings_screen.dart';
@@ -43,7 +44,8 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width >= _wideBreakpoint;
-    final state = AppScope.read(context);
+    final state = AppScope.of(context);
+    final pages = state.labRole == LabRole.client ? [0, 3, 5] : [0, 1, 2, 3, 4, 5];
 
     final Widget content;
     if (wide) {
@@ -61,7 +63,7 @@ class _HomeShellState extends State<HomeShell> {
                       child: Column(
                         key: const ValueKey('desktop-menu'),
                         children: [
-                          for (var i = 0; i < _pages.length; i++)
+                          for (final i in pages)
                             Padding(
                               padding: const EdgeInsets.symmetric(vertical: 2),
                               child: ListTile(

@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../data/lab_role.dart';
 import '../../server/host_controller.dart';
 import '../../state/app_state.dart';
 import '../chat/model_picker.dart';
@@ -154,6 +155,20 @@ class SettingsScreen extends StatelessWidget {
               ),
             ],
           ),
+          const _SectionTitle('Lab'),
+          _Card(children: [
+            ListTile(
+              title: const Text('Device role'),
+              subtitle: Text(state.labRole?.description ?? 'Choose how this PC will be used'),
+              trailing: DropdownButton<LabRole>(
+                value: state.labRole,
+                hint: const Text('Choose'),
+                items: [for (final role in LabRole.values)
+                  DropdownMenuItem(value: role, child: Text(role.label))],
+                onChanged: (role) { if (role != null) state.setLabRole(role); },
+              ),
+            ),
+          ]),
           const _SectionTitle('Appearance'),
           _Card(
             children: [

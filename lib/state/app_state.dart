@@ -10,6 +10,7 @@ import '../data/llm/llm_provider.dart';
 import '../data/llm/local_provider.dart';
 import '../data/local/local_models.dart';
 import '../data/models.dart';
+import '../data/lab_role.dart';
 import '../server/discovery.dart';
 import '../server/host_controller.dart';
 import '../tools/tool_registry.dart';
@@ -60,6 +61,7 @@ class AppState extends ChangeNotifier {
 
   ThemeMode themeMode = ThemeMode.system;
   AppThemeStyle themeStyle = AppThemeStyle.cream;
+  LabRole? labRole;
   String systemPrompt = '';
   ProviderKind provider = ProviderKind.anthropic;
   String model = ProviderKind.anthropic.models.first;
@@ -86,6 +88,7 @@ class AppState extends ChangeNotifier {
         ThemeMode.system;
     themeStyle = AppThemeStyle.values.asNameMap()[storage.getSetting('themeStyle')] ??
         AppThemeStyle.cream;
+    labRole = LabRole.values.asNameMap()[storage.getSetting('lab.role')];
     systemPrompt = storage.getSetting('systemPrompt') ?? '';
     provider = ProviderKind.values.asNameMap()[storage.getSetting('provider')] ??
         ProviderKind.anthropic;
@@ -206,6 +209,13 @@ class AppState extends ChangeNotifier {
     model = m;
     await storage.setSetting('provider', k.name);
     await storage.setSetting('model', m);
+    notifyListeners();
+  }
+
+  Future<void> setLabRole(LabRole role) async {
+    if (role == LabRole.client) await host.stop();
+    labRole = role;
+    await storage.setSetting('lab.role', role.name);
     notifyListeners();
   }
 

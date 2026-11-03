@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'core/theme.dart';
+import 'features/lab/role_picker.dart';
 import 'features/home/home_shell.dart';
 import 'features/host/agents_card.dart';
 import 'features/settings/settings_screen.dart';
@@ -31,11 +33,24 @@ class ChatApp extends StatelessWidget {
                     AgentApprovalOverlay(hub: state.host.agents, child: child!)
               : null,
           routes: {
-            '/': (_) => const HomeShell(),
+            '/': (_) => const _StartScreen(),
             '/settings': (_) => const SettingsScreen(),
           },
         ),
       ),
     );
+  }
+}
+
+class _StartScreen extends StatelessWidget {
+  const _StartScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    if (defaultTargetPlatform == TargetPlatform.windows && state.labRole == null) {
+      return const RolePicker();
+    }
+    return const HomeShell();
   }
 }
