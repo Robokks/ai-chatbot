@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:mcp_dart/mcp_dart.dart';
+import 'package:flutter/foundation.dart';
 
 import '../data/models.dart';
 import '../tools/tool_source.dart';
@@ -45,6 +46,14 @@ class HostMcpServer {
     required this.authorize,
     this.agents,
     this.device,
+    this.identify,
+    this.deviceNameFor,
+    this.modelsForIdentity,
+    this.runForIdentity,
+    this.checkTool,
+    this.watchAccess,
+    this.webTools = const [],
+    this.runWebTool,
   });
 
   final String Function() hostName;
@@ -53,14 +62,24 @@ class HostMcpServer {
   final bool Function(HttpRequest request) authorize;
   final AgentHost? agents;
 
-  /// Name of the device whose request was last let in; used to label agent
-  /// runs in the host's approval box.
   final String Function()? device;
-  StreamableMcpServer? _server;
+  final String? Function(HttpRequest)? identify;
+  final String Function(String)? deviceNameFor;
+  final List<SharedModel> Function(String)? modelsForIdentity;
+  final Future<(String, String)> Function(String, String?, String, String?)? runForIdentity;
+  final List<SourceTool> webTools;
+  final Future<ToolOutput> Function(String, String, Map<String, dynamic>)? runWebTool;
+  final void Function(String, String)? checkTool;
+  final VoidCallback Function(String, String, VoidCallback)? watchAccess;
+  HttpServer? _server;
+  final Map<String, Future<StreamableMcpServer>> _clients = {};
+  final Set<HttpClient> _connections = {};
+  bool _stopping = false;
 
-  int? get port => _server?.boundPort;
+  int? get port => _server?.port;
 
-  McpServer _build() {
+  McpServer _build(String identity) {
+    List<SharedModel> allowedModels() => modelsForIdentity?.call(identity) ?? models();
     final server = McpServer(
       Implementation(name: 'chatbot-host', version: '1.0.0'),
       options: const McpServerOptions(
@@ -75,7 +94,7 @@ class HostMcpServer {
         content: [
           TextContent(
             text: jsonEncode([
-              for (final m in models())
+              for (final m in allowedModels())
                 {
                   'id': m.id,
                   'name': m.displayName ?? m.model,
@@ -108,7 +127,10 @@ class HostMcpServer {
       ),
       callback: (args, extra) async {
         try {
-          final (text, model) = await run(
+          final runner = runForIdentity == null
+              ? run
+              : (String? m, String p, String? s) => runForIdentity!(identity, m, p, s);
+          final (text, model) = await runner(
             args['model'] as String?,
             args['prompt'] as String,
             args['system'] as String?,
@@ -125,14 +147,23 @@ class HostMcpServer {
         }
       },
     );
-    _registerAgents(server);
+    for (final tool in webTools) {
+      server.registerTool(tool.name, description: tool.description,
+        inputSchema: JsonSchema.fromJson(tool.inputSchema) as ToolInputSchema, callback: (args, extra) async {
+          try {
+            final result = await runWebTool!(identity, tool.name, args);
+            return CallToolResult(content: [TextContent(text: result.text)], isError: result.isError);
+          } catch (e) { return CallToolResult(content: [TextContent(text: '$e')], isError: true); }
+        });
+    }
+    _registerAgents(server, identity);
     return server;
   }
 
-  void _registerAgents(McpServer server) {
+  void _registerAgents(McpServer server, String identity) {
     final host = agents;
     if (host == null) return;
-    final deviceName = device?.call() ?? 'A paired device';
+    final deviceName = deviceNameFor?.call(identity) ?? device?.call() ?? 'A paired device';
     final settings = host.agentSettings;
     if (settings.folders.isEmpty) return;
     for (final agent in host.availableAgents) {
@@ -197,8 +228,12 @@ class HostMcpServer {
               isError: true,
             );
           }
+          checkTool?.call(identity, agent.toolName);
           var progress = 0;
           final cancelled = Completer<void>();
+          final unwatch = watchAccess?.call(identity, agent.toolName, () {
+            if (!cancelled.isCompleted) cancelled.complete();
+          });
           final subscription = extra.signal.onAbort.listen((_) {
             if (!cancelled.isCompleted) cancelled.complete();
           });
@@ -229,6 +264,7 @@ class HostMcpServer {
               isError: out.isError,
             );
           } finally {
+            unwatch?.call();
             await subscription.cancel();
           }
         },
@@ -236,22 +272,92 @@ class HostMcpServer {
     }
   }
 
+  /// Isolate MCP sessions by authenticated PC, including legacy stateful clients.
+  /// Internal servers bind loopback only and repeat the same key/identity checks.
   Future<void> start(int port) async {
-    final s = _server = StreamableMcpServer(
-      serverFactory: (_) => _build(),
-      host: '0.0.0.0',
-      port: port,
-      path: '/mcp',
-      authenticator: (request) => authorize(request as HttpRequest),
-      // Requests need an access key, so DNS-rebinding pages can't use it;
-      // LAN clients connect by IP, which a host allowlist can't predict.
-      enableDnsRebindingProtection: false,
-    );
-    await s.start();
+    if (_server != null) return;
+    _stopping = false;
+    _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
+    _server!.listen(_handle, onError: (_) {});
+  }
+
+  Future<void> _handle(HttpRequest request) async {
+    HttpClient? client;
+    try {
+      if (_stopping || request.uri.path != '/mcp') {
+        request.response.statusCode = 404;
+        await request.response.close();
+        return;
+      }
+      if (!authorize(request)) {
+        request.response.statusCode = 403;
+        await request.response.close();
+        return;
+      }
+      final identity = identify?.call(request) ?? 'default';
+      final server = await _clients.putIfAbsent(identity, () async {
+        final server = StreamableMcpServer(
+          serverFactory: (_) => _build(identity),
+          host: '127.0.0.1', port: 0, path: '/mcp',
+          authenticator: (req) => authorize(req as HttpRequest) &&
+              (identify?.call(req) ?? 'default') == identity,
+          enableDnsRebindingProtection: false,
+        );
+        await server.start();
+        return server;
+      });
+      if (_stopping) throw StateError('MCP is stopping');
+      client = HttpClient()..autoUncompress = false;
+      _connections.add(client);
+      final upstream = await client.openUrl(request.method,
+          Uri(scheme: 'http', host: '127.0.0.1', port: server.boundPort, path: '/mcp',
+              query: request.uri.query.isEmpty ? null : request.uri.query));
+      upstream.followRedirects = false;
+      const hopHeaders = {'host', 'content-length', 'transfer-encoding', 'connection',
+          'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'upgrade'};
+      request.headers.forEach((name, values) {
+        if (!hopHeaders.contains(name.toLowerCase())) upstream.headers.set(name, values);
+      });
+      var size = 0;
+      await for (final bytes in request) {
+        size += bytes.length;
+        if (size > 25 * 1024 * 1024) {
+          request.response.statusCode = 413;
+          client.close(force: true);
+          await request.response.close();
+          return;
+        }
+        upstream.add(bytes);
+      }
+      final response = await upstream.close();
+      request.response.statusCode = response.statusCode;
+      response.headers.forEach((name, values) {
+        if (!hopHeaders.contains(name.toLowerCase())) request.response.headers.set(name, values);
+      });
+      request.response.bufferOutput = false;
+      final activeClient = client;
+      unawaited(request.response.done.catchError((_) { activeClient.close(force: true); }));
+      await request.response.addStream(response);
+      await request.response.close();
+    } catch (_) {
+      try {
+        request.response.statusCode = 502;
+        await request.response.close();
+      } catch (_) {}
+    } finally {
+      if (client != null) _connections.remove(client);
+      client?.close(force: true);
+    }
   }
 
   Future<void> stop() async {
-    await _server?.stop();
+    _stopping = true;
+    await _server?.close(force: true);
     _server = null;
+    for (final client in _connections.toList()) { client.close(force: true); }
+    for (final pending in _clients.values.toList()) {
+      try { await (await pending).stop(); } catch (_) {}
+    }
+    _clients.clear();
   }
 }

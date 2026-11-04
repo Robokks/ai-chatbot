@@ -6,6 +6,8 @@ import 'package:ai_chatbot/data/models.dart';
 import 'package:ai_chatbot/server/agent_hub.dart';
 import 'package:ai_chatbot/server/coding_agents.dart';
 import 'package:ai_chatbot/server/host_server.dart';
+import 'package:ai_chatbot/server/client_access.dart';
+import 'package:ai_chatbot/tools/mcp_source.dart';
 import 'package:ai_chatbot/tools/tool_registry.dart';
 import 'package:ai_chatbot/tools/tool_source.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -299,6 +301,38 @@ void main() {
         progress.skip(before).any((p) => p.contains('is working')),
         isTrue,
       );
+    });
+
+    test('concurrent PCs retain their own identity in host approvals', () async {
+      await start();
+      final second = await host.createKey('Second PC');
+      final source = McpToolSource(ToolSourceConfig(id: 'second', type: ToolSourceType.mcp,
+        name: 'Main', url: 'http://127.0.0.1:${host.mcpPort}/mcp'), second.key);
+      await source.discover();
+      final first = registry.execute(ToolCall(id: 'first', name: agentTool('claude_code')!.name,
+        arguments: {'task': 'first', 'folder': 'proj'}));
+      final other = source.call('claude_code', {'task': 'second', 'folder': 'proj'});
+      for (var i = 0; i < 200 && hub.pending.length < 2; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(hub.pending.map((p) => p.device).toSet(), {'Offline PC', 'Second PC'});
+      for (final approval in List.of(hub.pending)) { hub.answer(approval, true); }
+      expect((await first).isError, isFalse);
+      expect((await other).isError, isFalse);
+      await source.close();
+    });
+
+    test('revoking access removes a pending remote agent approval', () async {
+      await start();
+      final run = registry.execute(ToolCall(id: 'revoke', name: agentTool('claude_code')!.name,
+        arguments: {'task': 'x', 'folder': 'proj'}));
+      await waitForApproval();
+      final device = host.devices.single;
+      await host.updateAccess(device, ClientAccess(blocked: true));
+      final result = await run.timeout(const Duration(seconds: 2));
+      expect(result.isError, isTrue);
+      expect(result.text, contains('Cancelled'));
+      expect(hub.pending, isEmpty);
     });
 
     test('a failing agent returns its exit code and errors', () async {

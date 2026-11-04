@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../core/device_stats.dart';
 import '../data/llm/llm_provider.dart';
 import '../data/models.dart';
+import '../data/lab_role.dart';
 import '../state/app_state.dart';
 import '../tools/cli_runner.dart';
 import 'agent_hub.dart';
@@ -28,6 +29,9 @@ class HostController extends ChangeNotifier implements HostBackend {
       saveDevices: _saveDevices,
       advertise: advertiseHost,
       agents: agentsSupported ? agents : null,
+      webTools: app.tools.builtin,
+      webEnabled: (name) => app.tools.enabled && !app.tools.disabledBuiltins.contains(name),
+      approvalsRequired: () => app.labRole == LabRole.main || app.labRole == LabRole.relay,
     )..addListener(notifyListeners);
     _load();
   }
@@ -51,6 +55,7 @@ class HostController extends ChangeNotifier implements HostBackend {
     ProviderKind.gemini,
     ProviderKind.openrouter,
     ProviderKind.groq,
+    ProviderKind.custom,
   ];
 
   bool shareLocal = true;
@@ -68,6 +73,7 @@ class HostController extends ChangeNotifier implements HostBackend {
     if (raw != null) {
       final j = jsonDecode(raw) as Map<String, dynamic>;
       shareLocal = j['shareLocal'] as bool? ?? true;
+      server.stopAll = j['stopAll'] as bool? ?? false;
       port = j['port'] as int? ?? defaultHostPort;
       sharedCloud
         ..clear()
@@ -86,6 +92,7 @@ class HostController extends ChangeNotifier implements HostBackend {
         jsonEncode({
           'shareLocal': shareLocal,
           'port': port,
+          'stopAll': server.stopAll,
           'cloud': [for (final k in sharedCloud) k.name],
         }),
       );
@@ -100,6 +107,13 @@ class HostController extends ChangeNotifier implements HostBackend {
 
   Future<void> _saveDevices(List<PairedDevice> d) =>
       app.storage.writeSecret('host.devices', jsonEncode([for (final x in d) x.toJson()]));
+
+  Future<void> setStopAll(bool stopped) async {
+    server.stopAll = stopped;
+    if (stopped) agents.denyAll();
+    await _save();
+    notifyListeners();
+  }
 
   Future<void> setShareLocal(bool v) async {
     shareLocal = v;
