@@ -64,6 +64,62 @@ class LabviewIntegration {
     );
   }
 
+  /// Session status is deliberately distinct from a saved endpoint.
+  String get connectionStatus {
+    final saved = config;
+    if (saved == null) return 'Not configured';
+    if (!saved.enabled) return 'Disabled';
+    final status = tools.status[sourceId];
+    if (status == null) return 'Not checked in this app session';
+    if (status.loading) return 'Checking MCP connection…';
+    if (status.error != null) return 'Connection failed: ${status.error}';
+    if (status.tools.isEmpty) return 'Connected; DynasBrain returned no tools';
+    return 'Connected · ${status.tools.length} MCP tools discovered';
+  }
+
+  String get diagnosticHint {
+    final error = tools.status[sourceId]?.error?.toLowerCase() ?? '';
+    if (error.contains('access denied')) {
+      return 'Check the DynasBrain access key and reconnect.';
+    }
+    if (error.contains('timed out') ||
+        error.contains('connection refused') ||
+        error.contains('socket')) {
+      return 'Check that dynasbrain serve is running, the port matches its output, and the LabVIEW PC firewall allows this connection.';
+    }
+    if (error.isNotEmpty) {
+      return 'Check the /mcp URL against DynasBrain’s server output. This app requires Streamable HTTP MCP.';
+    }
+    return 'This check discovers tools only. It does not verify that LabVIEW, an instrument, or a VI is ready.';
+  }
+
+  bool expertSelected(String current) =>
+      storage.getSetting('labview.preset.active') == current &&
+      current.isNotEmpty;
+
+  /// Preserve the user's prompt and restore it only if they have not edited it.
+  Future<void> selectExpert(
+    bool enabled, {
+    required String current,
+    required Future<void> Function(String) writePrompt,
+  }) async {
+    if (enabled) {
+      if (expertSelected(current)) return;
+      final composed = current.trim().isEmpty
+          ? expertPrompt
+          : '$current\n\n$expertPrompt';
+      await storage.setSetting('labview.preset.previous', current);
+      await storage.setSetting('labview.preset.active', composed);
+      await writePrompt(composed);
+    } else {
+      if (expertSelected(current)) {
+        await writePrompt(storage.getSetting('labview.preset.previous') ?? '');
+      }
+      await storage.setSetting('labview.preset.active', '');
+      await storage.setSetting('labview.preset.previous', '');
+    }
+  }
+
   List<LabviewSharedTool> sharedTools() => !shared
       ? const []
       : [
