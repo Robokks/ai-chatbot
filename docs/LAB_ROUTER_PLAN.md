@@ -107,9 +107,12 @@ Same Flutter codebase (`Robokks/ai-chatbot`, branch `ccr-85a70df3-vqfuzv`). Andr
 
 The Phase 0–3 service flows now have implementations and automated tests. Main exposes
 OpenAI chat, Anthropic Messages and stateless Responses APIs behind the same per-PC rules.
-Named source routing uses measured health and encrypted key rotation; a chain stays within
-one API format to preserve signed tool conversation data. Smartest uses user priorities;
-provider account limits and vision/context capabilities are not invented from model names.
+Named source routing uses measured health and encrypted key rotation. Mixed-provider chains
+can fall back before output begins; protected tool/thinking history pins continuation to its
+actual provider format. Smartest uses user priorities. Source/key request and token budgets
+with configurable reset windows are enforced before dispatch and persisted. Model switches,
+Vision/Tools/context filters and token budget bars use explicitly configured metadata;
+unknown capabilities and account allowances are never guessed from model names.
 Provider-reported usage settles reservations; missing usage stays conservatively reserved.
 
 Package settings apply to a launched terminal session through a credential-injecting loopback
@@ -122,6 +125,14 @@ LAN update downloads verify size/SHA256 and remain manual installs. LabVIEW call
 DynasBrain MCP calls; neither simulation of hardware nor automatic instrument execution is
 claimed. Already accepted hardware actions cannot be cancelled retroactively.
 
-The screenshot's provider-specific quota capacities and capability/context filters require
-actual provider metadata; unknown values are shown honestly rather than assumed. This is a
-functional implementation, not a pixel-identical copy of FreeLLMAPI.
+Main now exposes Sources and Agents directly. Chat has independent web-search and system
+prompt controls. Client status intersects all relay rules, shows actual remaining inherited
+budgets, removes revoked models immediately, and advertises only authorized verified updates.
+Windows setup detects installed tools and writes reusable app-owned launchers; Stop disables
+them. LabVIEW offers direct configured terminal startup, honest MCP diagnostics and a reversible
+expert preset that preserves custom prompts.
+
+The remaining verification is physical Windows/lab testing with real account credentials,
+network topology and LabVIEW hardware. No simulated hardware result or installed-version
+comparison is presented as real. Exact provider-side token counting is unsupported where no
+verified tokenizer/API exists; the coding shim reports that explicitly.

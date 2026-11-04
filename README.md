@@ -63,8 +63,10 @@ retain existing app data.
   can be configured. Credentials stay encrypted. Add multiple keys, then an Auto chain.
 - **Routing:** Manual, Fastest, Most reliable or Smartest (your priorities). Health and
   token totals come from observed requests. Failed keys cool down; fallback stops once any
-  answer, reasoning or tool output begins. Chains use one provider format to preserve signed
-  tool history. Remaining account quota is not guessed.
+  answer, reasoning or tool output begins. Mixed providers can share a chain; protected tool
+  history pins subsequent requests to its actual provider format. Configure source/key budgets
+  and reset windows, model on/off switches and known Vision/Tools/context capabilities. Unknown
+  account allowances and capabilities are never guessed.
 - **Clients:** pair with Main or a relay, then approve on Main. Set models, tools, services,
   expiry and daily request/token limits. Block, expiry and Stop all interrupt active model
   requests. Unknown provider usage keeps the reserved token allowance charged.
@@ -77,14 +79,19 @@ retain existing app data.
   open. A loopback shim keeps the Main key out of CLI settings and environment. Codex uses
   an isolated app-owned configuration and the Responses endpoint; unsupported API features
   report an error. External CLI compatibility still needs a Windows smoke test.
+- **Main navigation:** Sources and Agents have direct menu entries. Chat has its own web-search
+  switch and system-prompt editor. Windows coding setup detects installed programs, remembers
+  the workspace and writes reusable app-owned launchers; Stop deactivates those launchers.
 - **Analytics and Logs:** measured success, failures, tokens, latency and first-text timing,
   filtered by PC/model over 24 hours, 7 days or 30 days. Logs retain request metadata only;
   unknown usage is shown as unknown. History is bounded and retention is disclosed.
 - **LAN updates:** Main checks the official rolling Windows release and caches a verified
   ZIP. Approved clients download from Main (including through relays), verifying size and
-  SHA256. Installation remains manual; archives are never executed automatically.
+  SHA256. Authorized clients see a notice when Main has a verified update that they have not
+  downloaded. Installation remains manual; archives are never executed automatically.
 - **LabVIEW:** Tools → LabVIEW connects DynasBrain's real `/mcp` endpoint and offers an expert
-  prompt. Main can opt into sharing those tools; each remote call requires a separate Main
+  prompt that preserves and can restore your previous prompt, real MCP diagnostics, and a
+  direct configured DynasBrain terminal. Main can opt into sharing those tools; each remote call requires a separate Main
   approval and explicit PC permission. Changing shared tools updates the MCP catalogue;
   legacy sessions may need to reconnect. Already accepted hardware actions cannot be undone
   by disconnecting.

@@ -18,7 +18,8 @@ Runtime access policies and command/hardware approvals remain part of the app.
 Foundation, client rules, named sources and signed relay forwarding have passed Linux checks
 and Windows CI. Routing, package proxy, local CLI setup, analytics, LAN updates and LabVIEW
 integration are now implemented. Final Linux verification: `flutter analyze` prints “No issues found!”
-and all 218 tests pass, including actual local chat routing and approval/revocation races.
+and all 248 tests pass, including mixed-provider replay, configured source/key budgets, model
+controls, inherited access, update cancellation and approval/revocation races.
 Physical Windows multi-PC / LabVIEW validation remains a manual lab check.
 
 ## Original review findings
