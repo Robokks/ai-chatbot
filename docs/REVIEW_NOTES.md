@@ -8,19 +8,18 @@ runner if your PC has no Flutter.
 Already fixed: the coding-agent check (`claude --version` / `codex --version`) no longer runs at app
 start. It runs when the host screen opens or the server starts (`AgentHub.ensureDetected`).
 
-## Foundation implementation status (2026-11-03)
+## Implementation status (2026-11-04)
 
-Items 1–5 below are now implemented: approval keepalives, cancellation, PowerShell literal
-quoting, visible MCP startup errors and the clarified read-only wording. Progress uses a
-per-call increasing counter so approval and run clocks cannot cause progress to disappear.
-Item 7 is also fixed: PIN rotation uses a timer and the PIN getter does not notify listeners.
-Item 8 is updated in README. The current local checks are clean analysis and 112 passing tests,
-including desktop/phone navigation and saved Windows role selection.
+Items 1–8 are implemented, including per-PC MCP isolation, simultaneous approval identity,
+monotonic progress, cancellation, PowerShell quoting, visible port errors and PIN rotation.
+The user authorized continuing all Lab Router phases without development approval pauses.
+Runtime access policies and command/hardware approvals remain part of the app.
 
-Item 6 remains open: per-client MCP identity and policy enforcement belong to Phase 1. An
-implementation attempt that rewrites the MCP gateway/session handling was blocked by automatic
-approval review pending specific authorization. The unfinished access-control draft is kept
-outside the app checkout; it is not active or claimed complete. Phases 1–3 remain outstanding.
+Foundation, client rules, named sources and signed relay forwarding have passed Linux checks
+and Windows CI. Routing, package proxy, local CLI setup, analytics, LAN updates and LabVIEW
+integration are now implemented. Final Linux verification: `flutter analyze` prints “No issues found!”
+and all 218 tests pass, including actual local chat routing and approval/revocation races.
+Physical Windows multi-PC / LabVIEW validation remains a manual lab check.
 
 ## Original review findings
 

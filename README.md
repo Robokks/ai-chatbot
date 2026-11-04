@@ -30,7 +30,7 @@ retain existing app data.
 
 - **Multiple providers.** Switch models from the composer. Keys are stored encrypted on the
   device (Android Keystore / Windows Credential Manager) and sent only to the provider you
-  chat with. There is no backend.
+  chat with. Main can optionally serve your private lab network.
 - **Streaming replies** with a stop button, regenerate, edit-and-resend, and copy.
 - **File uploads:** photos, camera capture (Android), PDFs, and text/code files. Drag and drop
   works on Windows.
@@ -49,12 +49,49 @@ retain existing app data.
 - **Two theme styles:** choose **Cream** or **White / black** in Settings → Appearance.
   Both support light/dark/system mode and use bundled fonts, including Inter.
 - **Desktop navigation:** Chat, Models, Clients, Tools, Logs and Settings on wide screens.
-  Models, Clients and Logs are placeholders for the Lab Router phases. Phones keep the chat drawer.
+  Analytics shows measured request data. Phones keep the chat drawer.
 - **Windows roles:** choose Main, Client or Relay on first start, or change the role in Settings.
-  Choosing a role does not start sharing or grant access. Relay forwarding and per-client policy
-  controls are planned work; the role picker alone does not implement them.
+  Main approves each PC; signed relay paths preserve the original PC identity through up to eight relays.
+  Choosing a role does not start sharing or grant access.
 - **Keyboard shortcuts (Windows):** Enter sends, Shift+Enter adds a new line, Ctrl+N starts a
   new chat, Ctrl+, opens settings.
+
+## Windows lab router
+
+- **Main:** add named sources under Models → AI sources. FreeLLMAPI, OpenAI-compatible
+  NVIDIA NIM / Cloudflare endpoints and native Gemini, Groq, OpenRouter and other providers
+  can be configured. Credentials stay encrypted. Add multiple keys, then an Auto chain.
+- **Routing:** Manual, Fastest, Most reliable or Smartest (your priorities). Health and
+  token totals come from observed requests. Failed keys cool down; fallback stops once any
+  answer, reasoning or tool output begins. Chains use one provider format to preserve signed
+  tool history. Remaining account quota is not guessed.
+- **Clients:** pair with Main or a relay, then approve on Main. Set models, tools, services,
+  expiry and daily request/token limits. Block, expiry and Stop all interrupt active model
+  requests. Unknown provider usage keeps the reserved token allowance charged.
+- **Package access:** enable it in Share this device and grant the PC **Package downloads**.
+  Settings → Coding tools opens a terminal where git, pip and npm use a loopback proxy to
+  Main. These session settings preserve existing global configuration. Proxy port is the
+  host port + 2 (normally 8486); only the fixed package host allowlist is reachable.
+- **Local coding tools:** install Claude Code or Codex on the Windows client, pair with Main,
+  select a project folder and approved model in Settings → Coding tools. The app must stay
+  open. A loopback shim keeps the Main key out of CLI settings and environment. Codex uses
+  an isolated app-owned configuration and the Responses endpoint; unsupported API features
+  report an error. External CLI compatibility still needs a Windows smoke test.
+- **Analytics and Logs:** measured success, failures, tokens, latency and first-text timing,
+  filtered by PC/model over 24 hours, 7 days or 30 days. Logs retain request metadata only;
+  unknown usage is shown as unknown. History is bounded and retention is disclosed.
+- **LAN updates:** Main checks the official rolling Windows release and caches a verified
+  ZIP. Approved clients download from Main (including through relays), verifying size and
+  SHA256. Installation remains manual; archives are never executed automatically.
+- **LabVIEW:** Tools → LabVIEW connects DynasBrain's real `/mcp` endpoint and offers an expert
+  prompt. Main can opt into sharing those tools; each remote call requires a separate Main
+  approval and explicit PC permission. Changing shared tools updates the MCP catalogue;
+  legacy sessions may need to reconnect. Already accepted hardware actions cannot be undone
+  by disconnecting.
+
+Use the lab network only. Permit Windows firewall access to your chosen Main ports on the
+private network. Provider HTTPS stays verified; package CONNECT tunnels keep destination TLS
+end to end. This does not replace a router or provide unrestricted client internet access.
 
 ## Getting started
 

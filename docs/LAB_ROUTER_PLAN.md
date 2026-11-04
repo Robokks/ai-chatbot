@@ -102,3 +102,26 @@ Same Flutter codebase (`Robokks/ai-chatbot`, branch `ccr-85a70df3-vqfuzv`). Andr
   3. The client runs PowerShell, git push through the proxy, and web search.
   4. Claude Code on the client through Main.
 
+
+## Implementation notes (2026-11-04)
+
+The Phase 0–3 service flows now have implementations and automated tests. Main exposes
+OpenAI chat, Anthropic Messages and stateless Responses APIs behind the same per-PC rules.
+Named source routing uses measured health and encrypted key rotation; a chain stays within
+one API format to preserve signed tool conversation data. Smartest uses user priorities;
+provider account limits and vision/context capabilities are not invented from model names.
+Provider-reported usage settles reservations; missing usage stays conservatively reserved.
+
+Package settings apply to a launched terminal session through a credential-injecting loopback
+proxy; existing user global settings are preserved. Local coding tools use the same credential
+boundary. Git, pip and npm still need to be installed on the Windows PC. The app must remain
+open for those loopback services. Windows terminal launches, external CLI versions and actual
+lab networking/hardware require the manual verification above.
+
+LAN update downloads verify size/SHA256 and remain manual installs. LabVIEW calls are real
+DynasBrain MCP calls; neither simulation of hardware nor automatic instrument execution is
+claimed. Already accepted hardware actions cannot be cancelled retroactively.
+
+The screenshot's provider-specific quota capacities and capability/context filters require
+actual provider metadata; unknown values are shown honestly rather than assumed. This is a
+functional implementation, not a pixel-identical copy of FreeLLMAPI.
