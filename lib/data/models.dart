@@ -175,6 +175,7 @@ class Message {
     List<Attachment>? attachments,
     this.error,
     this.model,
+    this.routingInfo,
     this.provider,
     this.usage,
     List<ToolCall>? toolCalls,
@@ -194,6 +195,7 @@ class Message {
   final List<Attachment> attachments;
   String? error;
   String? model;
+  String? routingInfo;
 
   /// Provider that wrote this reply (for usage totals and pricing).
   ProviderKind? provider;
@@ -220,6 +222,7 @@ class Message {
           'attachments': attachments.map((a) => a.toJson()).toList(),
         if (error != null) 'error': error,
         if (model != null) 'model': model,
+        if (routingInfo != null) 'routingInfo': routingInfo,
         if (provider != null) 'provider': provider!.name,
         if (usage != null) 'usage': usage!.toJson(),
         if (toolCalls.isNotEmpty) 'toolCalls': [for (final c in toolCalls) c.toJson()],
@@ -238,6 +241,7 @@ class Message {
             .toList(),
         error: j['error'] as String?,
         model: j['model'] as String?,
+        routingInfo: j['routingInfo'] as String?,
         provider: ProviderKind.values.asNameMap()[j['provider']],
         usage: j['usage'] == null
             ? null
@@ -418,7 +422,7 @@ enum ProviderKind {
 
 /// User-editable per-provider settings (the API key lives in secure storage).
 class ProviderSettings {
-  ProviderSettings({required this.kind, String? baseUrl, List<String>? models})
+  ProviderSettings({required this.kind, String? baseUrl, List<String>? models, this.requestUsage = false})
       : baseUrl = baseUrl ?? kind.baseUrl,
         models = models ?? List.of(kind.models);
 
@@ -426,12 +430,14 @@ class ProviderSettings {
   String baseUrl;
   List<String> models;
 
-  Map<String, dynamic> toJson() => {'baseUrl': baseUrl, 'models': models};
+  bool requestUsage;
+  Map<String, dynamic> toJson() => {'baseUrl': baseUrl, 'models': models, 'requestUsage': requestUsage};
 
   factory ProviderSettings.fromJson(ProviderKind kind, Map<String, dynamic> j) =>
       ProviderSettings(
         kind: kind,
         baseUrl: j['baseUrl'] as String?,
+        requestUsage: j['requestUsage'] as bool? ?? false,
         models: (j['models'] as List?)?.cast<String>(),
       );
 }

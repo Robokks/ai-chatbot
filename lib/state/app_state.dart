@@ -170,6 +170,7 @@ class AppState extends ChangeNotifier {
   /// A provider ready to chat with [k] using its saved settings and key.
   LlmProvider providerFor(ProviderKind k, {String? modelId}) {
     final route = modelId ?? (k == provider ? model : '');
+    if (route.startsWith('auto:')) return sources.routingProvider(route);
     final source = sources.forRoute(k, route);
     if (route.startsWith('source:') && source == null) throw LlmException('This AI source is no longer available.');
     return source == null ? _providerFactory(providers[k]!, keyFor(k)) : sources.provider(source, route);
@@ -385,7 +386,7 @@ class AppState extends ChangeNotifier {
         reply.error = 'Connect to Main and request access to a model first.';
         return _finish(c);
       }
-      if (!hasKey(provider) && sources.forRoute(provider, model) == null) {
+      if (!hasKey(provider) && sources.forRoute(provider, model) == null && sources.chainFor(model) == null) {
         reply.error = provider == ProviderKind.local
             ? 'Download an on-device model in Settings first.'
             : 'Add a ${provider.label} API key in Settings to start chatting.';
@@ -461,6 +462,7 @@ class AppState extends ChangeNotifier {
             reply.reasoning += d.reasoning;
             reply.toolCalls.addAll(d.toolCalls);
             if (d.providerBlocks != null) reply.providerBlocks = d.providerBlocks;
+            if (d.routingInfo != null) reply.routingInfo = d.routingInfo;
             if (d.notice != null) reply.error = d.notice;
             notifyListeners();
           },

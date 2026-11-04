@@ -202,7 +202,7 @@ class _AssistantMessage extends StatelessWidget {
                   if (message.model != null)
                     Flexible(
                       child: Text(
-                        AppScope.read(context).localModels.byId(message.model!)?.name ??
+                        message.routingInfo ?? AppScope.read(context).localModels.byId(message.model!)?.name ??
                             prettyModel(message.model!),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,

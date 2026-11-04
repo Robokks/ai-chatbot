@@ -45,6 +45,19 @@ void main() {
     expect(state.storage.getSetting('lab.sources'), isNot(contains('only-a-test-key')));
     expect(find.text('Lab API'), findsOneWidget);
     expect(find.byType(AlertDialog), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Add chain'));
+    await tester.pumpAndSettle();
+    final choice = tester.widget<CheckboxListTile>(find.widgetWithText(CheckboxListTile, 'Lab API · auto'));
+    choice.onChanged!(true);
+    await tester.pump();
+    final saveChain = tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save chain'));
+    await tester.runAsync(() async { await (saveChain.onPressed! as dynamic)(); });
+    await tester.pumpAndSettle();
+    expect(state.sources.chains.single.routes, [state.sources.all.single.route('auto')]);
+    expect(state.sources.chains.single.shared, isFalse);
+    expect(find.text('Auto · Default'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

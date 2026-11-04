@@ -14,6 +14,7 @@ class ChatDelta {
     this.text = '',
     this.reasoning = '',
     this.notice,
+    this.routingInfo,
     this.status,
     this.usage,
     this.toolCalls = const [],
@@ -24,6 +25,9 @@ class ChatDelta {
 
   /// A non-fatal message to show under the reply (e.g. a refusal).
   final String? notice;
+
+  /// Actual selected source and number of pre-output fallbacks.
+  final String? routingInfo;
 
   /// Transient progress shown while waiting for output (e.g. loading a model).
   final String? status;

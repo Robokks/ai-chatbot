@@ -29,7 +29,7 @@ class ModelPill extends StatelessWidget {
               child: Text(
                 state.provider == ProviderKind.local
                     ? state.localModels.byId(state.model)?.name ?? state.model
-                    : prettyModel(state.model),
+                    : state.sources.chainFor(state.model) == null ? prettyModel(state.model) : 'Auto · ${state.sources.chainFor(state.model)!.name}',
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: p.textMuted,
@@ -105,6 +105,11 @@ class _ModelList extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
           child: Text('Choose a model', style: serif(context, size: 22)),
         ),
+        if (state.labRole != LabRole.client && state.labRole != LabRole.relay)
+          for (final chain in state.sources.chains.where((c) => c.enabled))
+            ListTile(title: Text('Auto · ${chain.name}'), subtitle: Text(chain.strategy.name),
+              selected: state.model == chain.route,
+              onTap: () { state.selectModel(state.sources.kindForChain(chain), chain.route); Navigator.pop(context); }),
         if (state.labRole != LabRole.client && state.labRole != LabRole.relay)
           for (final source in state.sources.all.where((s) => s.enabled)) ...[
             Padding(padding: const EdgeInsets.fromLTRB(8, 16, 8, 6), child: Text(source.name,

@@ -11,7 +11,7 @@ import 'sse.dart';
 class OpenAiProvider extends LlmProvider {
   OpenAiProvider({required super.settings, required super.apiKey, super.client});
 
-  bool get _reportsUsage => const {
+  bool get _reportsUsage => settings.requestUsage || const {
         ProviderKind.openai,
         ProviderKind.deepseek,
         ProviderKind.openrouter,
