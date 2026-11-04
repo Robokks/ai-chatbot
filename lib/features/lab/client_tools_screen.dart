@@ -20,6 +20,37 @@ class ClientToolsScreen extends StatelessWidget {
               child: const Text('Choose folder'),
             ),
           ),
+          ListTile(
+            title: Text(
+              'Local API: ${controller.apiRunning ? 'running' : 'stopped'} · Packages: ${controller.packageRunning ? 'running' : 'stopped'}',
+            ),
+            trailing: OutlinedButton(
+              onPressed: controller.stop,
+              child: const Text('Stop local sessions'),
+            ),
+          ),
+          Wrap(
+            spacing: 8,
+            children: [
+              OutlinedButton(
+                onPressed: controller.checkTools,
+                child: const Text('Check installed tools'),
+              ),
+              for (final entry in controller.installedTools.entries)
+                Chip(
+                  label: Text(
+                    '${entry.key}: ${entry.value == null ? 'not found' : 'found'}',
+                  ),
+                ),
+            ],
+          ),
+          if (controller.launchers.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: SelectableText(
+                'Reusable launchers (app must stay open):\n${controller.launchers.values.join('\n')}\nStop restores the launchers to an inactive state. Global tool settings are unchanged.',
+              ),
+            ),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 24),
             child: Text(

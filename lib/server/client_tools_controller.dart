@@ -15,6 +15,11 @@ import 'package_proxy.dart';
 class ClientToolsController extends ChangeNotifier {
   ClientToolsController(this.app) {
     _identity = _connectionIdentity;
+    workspace = app.storage.getSetting('clientTools.workspace');
+    _launcherDirectory = app.storage.getSetting('clientTools.launchers');
+    _cleanup = _launcherDirectory == null
+        ? Future.value()
+        : CodingClientSetup.invalidateLaunchers(Directory(_launcherDirectory!));
     app.addListener(_changed);
   }
   final AppState app;
@@ -22,6 +27,37 @@ class ClientToolsController extends ChangeNotifier {
   PackageProxy? _packages;
   String? workspace;
   late String _identity;
+  String? _launcherDirectory;
+  late Future<void> _cleanup;
+  final Map<String, String> launchers = {};
+  Map<String, String?> installedTools = {};
+  bool get apiRunning => _api?.url != null;
+  bool get packageRunning => _packages?.port != null;
+  Future<void> checkTools() async {
+    installedTools = await CodingClientSetup.detectTools();
+    notifyListeners();
+  }
+
+  Future<void> _saveLauncher(
+    String name,
+    Directory directory,
+    Map<String, String> environment,
+  ) async {
+    await _cleanup;
+    final support = await getApplicationSupportDirectory();
+    _launcherDirectory =
+        '${support.path}${Platform.pathSeparator}lab-launchers';
+    final file = await CodingClientSetup.writeLauncher(
+      directory: Directory(_launcherDirectory!),
+      name: name,
+      workspace: directory,
+      environment: environment,
+    );
+    launchers[name] = file.path;
+    await app.storage.setSetting('clientTools.launchers', _launcherDirectory);
+    notifyListeners();
+  }
+
   String get _connectionIdentity =>
       '${app.providers[ProviderKind.network]?.baseUrl}|${app.keyFor(ProviderKind.network)}';
   List<String> get models =>
@@ -40,6 +76,7 @@ class ClientToolsController extends ChangeNotifier {
     );
     if (path != null) {
       workspace = path;
+      await app.storage.setSetting('clientTools.workspace', path);
       notifyListeners();
     }
   }
@@ -117,6 +154,7 @@ class ClientToolsController extends ChangeNotifier {
     }
     // Package access is optional; opening a coding tool doesn't require it.
     if (_packages != null) env.addAll(await _packageEnvironment());
+    await _saveLauncher(codex ? 'codex' : 'claude', directory, env);
     await CodingClientSetup.openWindowsTerminal(
       codex: codex,
       workingDirectory: directory,
@@ -143,6 +181,7 @@ class ClientToolsController extends ChangeNotifier {
       ),
     );
     if (_packages != null) env.addAll(await _packageEnvironment());
+    await _saveLauncher('labview', directory, env);
     await Process.start(
       'cmd.exe',
       ['/d', '/c', 'start', '""', 'cmd.exe', '/d', '/k'],
@@ -158,6 +197,7 @@ class ClientToolsController extends ChangeNotifier {
       throw UnsupportedError('Windows terminal required');
     }
     final env = await _packageEnvironment();
+    await _saveLauncher('packages', directory, env);
     await Process.start(
       'cmd.exe',
       ['/d', '/c', 'start', '""', 'cmd.exe', '/d', '/k'],
@@ -174,10 +214,20 @@ class ClientToolsController extends ChangeNotifier {
     _packages = null;
     await api?.close();
     await packages?.stop();
+    await _cleanup;
+    if (_launcherDirectory != null) {
+      await CodingClientSetup.invalidateLaunchers(
+        Directory(_launcherDirectory!),
+      );
+    }
+    launchers.clear();
+    if (!_disposed) notifyListeners();
   }
 
+  bool _disposed = false;
   @override
   void dispose() {
+    _disposed = true;
     app.removeListener(_changed);
     unawaited(stop());
     super.dispose();

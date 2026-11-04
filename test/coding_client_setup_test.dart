@@ -175,6 +175,19 @@ void main() {
       expect((await denied.close()).statusCode, 403);
       final noKey = await client.getUrl(url.resolve('/v1/models'));
       expect((await noKey.close()).statusCode, 403);
+      final counter = await client.postUrl(
+        url.resolve('/v1/messages/count_tokens'),
+      );
+      counter.headers.set('x-api-key', 'lab-local');
+      final unsupported = await counter.close();
+      expect(unsupported.statusCode, 501);
+      final error =
+          jsonDecode(await unsupported.transform(utf8.decoder).join()) as Map;
+      expect(
+        (error['error'] as Map)['message'],
+        contains('No estimated count'),
+      );
+      expect(error.containsKey('input_tokens'), isFalse);
     },
   );
 }
