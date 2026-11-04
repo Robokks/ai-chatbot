@@ -5,6 +5,7 @@ import '../../data/models.dart';
 import '../../server/host_server.dart';
 import '../../state/app_state.dart';
 import '../../tools/cli_runner.dart';
+import '../../tools/local_program.dart';
 import '../../tools/tool_registry.dart';
 import '../../tools/tool_source.dart';
 import '../host/widgets.dart';
@@ -86,6 +87,22 @@ class ToolsScreen extends StatelessWidget {
               const SectionTitle('Your tools'),
               CardBox(children: [
                 for (final c in reg.configs) _SourceTile(config: c, status: reg.status[c.id]),
+              ]),
+            ],
+            if (desktopCli) ...[
+              const SectionTitle('Local programs on this PC'),
+              CardBox(children: [
+                for (final program in LocalProgram.values)
+                  if ((program != LocalProgram.powershell && program != LocalProgram.cmd) ||
+                      Theme.of(context).platform == TargetPlatform.windows)
+                    if (!reg.configs.any((c) => c.id == 'local-${program.name}'))
+                      ListTile(leading: const Icon(Icons.terminal), title: Text('Add ${program.label}'),
+                        subtitle: const Text('Uses your installed program. Every run asks first.'),
+                        trailing: const Icon(Icons.add),
+                        onTap: () => reg.addOrUpdate(ToolSourceConfig(
+                          id: 'local-${program.name}', type: ToolSourceType.cli,
+                          name: 'Local ${program.label}', url: program.executable,
+                          variables: {'localProgram': program.name}))),
               ]),
             ],
             const SectionTitle('Add'),
@@ -220,6 +237,8 @@ class _SourceScreenState extends State<SourceScreen> {
       askBeforeRun: _ask,
       description: _desc.text.trim(),
       variables: {
+        if (widget.existing?.variables['localProgram'] != null)
+          'localProgram': widget.existing!.variables['localProgram']!,
         for (final line in _vars.text.split('\n'))
           if (line.contains('='))
             line.substring(0, line.indexOf('=')).trim(): line.substring(line.indexOf('=') + 1).trim(),

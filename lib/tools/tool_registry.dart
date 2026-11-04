@@ -242,7 +242,7 @@ class ToolRegistry extends ChangeNotifier {
   String describe(ToolCall call) {
     final route = _routes[call.name];
     final source = route == null ? null : _live[route.$1];
-    if (source is CliToolSource) return CliToolSource.preview(source.config.url, call.arguments);
+    if (source is CliToolSource) return source.describe(call.arguments);
     if (source is UtcpToolSource) {
       final script = source.cliPreview(route!.$2, call.arguments);
       if (script != null) return script;
