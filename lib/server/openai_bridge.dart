@@ -163,6 +163,18 @@ List<Attachment> _images(Object? content) {
   if (content is! List) return const [];
   final out = <Attachment>[];
   for (final p in content) {
+    if (p is Map && p['type'] == 'file') {
+      final file = p['file'];
+      final data = file is Map ? file['file_data'] : null;
+      if (data is String && data.startsWith('data:application/pdf;base64,')) {
+        final Uint8List bytes;
+        try { bytes = base64Decode(data.substring('data:application/pdf;base64,'.length)); }
+        catch (_) { throw BridgeException('Invalid base64 PDF data'); }
+        out.add(Attachment(name: file['filename'] as String? ?? 'document.pdf', mimeType: 'application/pdf',
+          kind: AttachmentKind.pdf, size: bytes.length, bytes: bytes));
+      }
+      continue;
+    }
     if (p is! Map || p['type'] != 'image_url') continue;
     final url = (p['image_url'] as Map?)?['url'];
     final match = url is String ? _dataUrl.firstMatch(url) : null;

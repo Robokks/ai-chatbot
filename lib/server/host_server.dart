@@ -13,6 +13,7 @@ import 'host_mcp.dart';
 import 'client_access.dart';
 import 'host_protocols.dart';
 import 'openai_bridge.dart';
+import 'anthropic_bridge.dart';
 
 /// What the host needs from the app: which models it shares and how to
 /// reach them.
@@ -134,6 +135,7 @@ class HostServer extends ChangeNotifier {
   Future<void> Function()? _stopAdvertising;
   List<PairedDevice> devices = [];
   final List<HostLogEntry> log = [];
+  final _messageReplay = <String, ({ProviderKind provider, List<Map<String, dynamic>> blocks})>{};
   int activeRequests = 0;
 
   String _pin = '';
@@ -231,6 +233,7 @@ class HostServer extends ChangeNotifier {
     _stopAdvertising = null;
     await _server?.close(force: true);
     _server = null;
+    _messageReplay.clear();
     notifyListeners();
   }
 
@@ -421,6 +424,7 @@ class HostServer extends ChangeNotifier {
       final device = authenticate(req);
       if (device == null) {
         return await _json(res, 401, {
+          if (path == '/v1/messages') 'type': 'error',
           'error': {
             'message': 'Missing or invalid access key. Pair this device or create a key on the host.',
             'type': 'authentication_error',
@@ -461,6 +465,7 @@ class HostServer extends ChangeNotifier {
       if (req.method == 'GET' && (path == '/v1/models' || path == '/models')) {
         return await _json(res, 200, modelsResponse(modelsFor(device)));
       }
+      if (req.method == 'POST' && path == '/v1/messages') return await _messages(req, device);
       if (req.method == 'POST' && (path == '/v1/chat/completions' || path == '/chat/completions')) {
         return await _chat(req, device);
       }
@@ -477,7 +482,7 @@ class HostServer extends ChangeNotifier {
         'error': {'message': 'Not found: ${req.method} ${req.uri.path}', 'type': 'not_found'},
       });
     } on BridgeException catch (e) {
-      await _json(res, e.status, e.toJson());
+      await _json(res, e.status, req.uri.path == '/v1/messages' ? anthropicError(e.status, e.message) : e.toJson());
     } catch (e) {
       try {
         await _json(res, 500, {
@@ -556,6 +561,109 @@ class HostServer extends ChangeNotifier {
     await saveDevices(devices);
     newPin();
     await _json(res, 200, {'key': device.key, 'name': backend.deviceName});
+  }
+
+  Future<void> _messages(HttpRequest req, PairedDevice device) async {
+    final body = await _readJson(req);
+    final parsed = parseAnthropicRequest(body);
+    if (device.access.tools != null && parsed.tools.any((t) => !device.access.tools!.contains(t.name))) {
+      throw BridgeException('This tool is not allowed by Main. Refresh access or request more access.', status: 403);
+    }
+    final route = SharedModel.parseId(parsed.modelId);
+    if (route == null) throw BridgeException('Invalid model id', status: 404);
+    for (final message in parsed.messages.where((m) => m.role == Role.assistant && m.toolCalls.isNotEmpty)) {
+      final replay = _messageReplay[messageReplayKey(device.id, parsed.modelId, message)];
+      if (replay != null) { message.provider = replay.provider; message.providerBlocks = replay.blocks; }
+      else if (route.$1 == ProviderKind.gemini) {
+        throw BridgeException('The tool conversation context on Main expired. Start a new chat.', status: 409);
+      }
+    }
+    final reservation = await _reserve(device, parsed.modelId, 'chat', body);
+    final requested = body['max_tokens'] as int;
+    final maximum = reservation.maxOutputTokens == null ? requested : min(requested, reservation.maxOutputTokens!);
+    final stream = _guarded(_providerStream(route.$1, ChatRequest(model: route.$2,
+      messages: parsed.messages, systemPrompt: parsed.systemPrompt, tools: parsed.tools,
+      maxOutputTokens: maximum)), device, parsed.modelId, 'chat');
+    final writer = CompletionWriter(parsed.modelId);
+    final res = req.response;
+    final id = 'msg_${_newKey().substring(4)}';
+    Timer? ping;
+    StreamSubscription<ChatDelta>? subscription;
+    var cancelled = false;
+    var status = 'ok';
+    var textStarted = false;
+    var streamedText = false;
+    void event(String name, Map<String, dynamic> data) {
+      try { res.write('event: $name\ndata: ${jsonEncode(data)}\n\n'); } catch (_) {}
+    }
+    activeRequests++; notifyListeners();
+    try {
+      if (parsed.stream) {
+        res.headers.contentType = ContentType('text', 'event-stream', charset: 'utf-8');
+        res.headers.set('cache-control', 'no-cache'); res.bufferOutput = false;
+        event('message_start', {'type': 'message_start', 'message': {'id': id, 'type': 'message', 'role': 'assistant',
+          'model': parsed.modelId, 'content': [], 'stop_reason': null, 'stop_sequence': null,
+          'usage': {'input_tokens': 0, 'output_tokens': 0}}});
+        ping = Timer.periodic(const Duration(seconds: 15), (_) => event('ping', {'type': 'ping'}));
+      }
+      final done = Completer<void>();
+      Object? failure;
+      subscription = stream.listen((delta) {
+        writer.add(delta);
+        // Native thinking must keep its original order and signature, so it is
+        // emitted from the final signed blocks. Other providers stream text live.
+        if (parsed.stream && route.$1 != ProviderKind.anthropic && delta.text.isNotEmpty) {
+          if (!textStarted) {
+            textStarted = true;
+            event('content_block_start', {'type': 'content_block_start', 'index': 0,
+              'content_block': {'type': 'text', 'text': ''}});
+          }
+          streamedText = true;
+          event('content_block_delta', {'type': 'content_block_delta', 'index': 0,
+            'delta': {'type': 'text_delta', 'text': delta.text}});
+        }
+      }, onError: (Object e) { failure = e; if (!done.isCompleted) done.complete(); },
+      onDone: () { if (!done.isCompleted) done.complete(); }, cancelOnError: true);
+      unawaited(res.done.catchError((_) {
+        cancelled = true; unawaited(subscription?.cancel());
+        if (!done.isCompleted) done.complete();
+      }));
+      await done.future;
+      if (cancelled) { status = 'cancelled'; return; }
+      if (failure != null) throw failure!;
+      if (writer.providerBlocks != null && writer.toolCalls.isNotEmpty) {
+        final message = Message(role: Role.assistant, text: writer.text.toString(), toolCalls: writer.toolCalls);
+        _messageReplay[messageReplayKey(device.id, parsed.modelId, message)] =
+            (provider: route.$1, blocks: writer.providerBlocks!);
+        if (_messageReplay.length > 256) _messageReplay.remove(_messageReplay.keys.first);
+      }
+      final content = anthropicContent(writer.text.toString(), writer.toolCalls,
+        nativeBlocks: route.$1 == ProviderKind.anthropic ? writer.providerBlocks : null);
+      final result = anthropicMessage(id: id, model: parsed.modelId, content: content, usage: writer.usage);
+      if (parsed.stream) {
+        var index = 0;
+        if (streamedText) { event('content_block_stop', {'type': 'content_block_stop', 'index': index++}); }
+        for (final block in content) {
+          if (streamedText && block['type'] == 'text') continue;
+          for (final part in anthropicBlockEvents(block, index)) { event(part.event, part.data); }
+          index++;
+        }
+        event('message_delta', {'type': 'message_delta', 'delta': {'stop_reason': result['stop_reason'], 'stop_sequence': null},
+          'usage': result['usage']});
+        event('message_stop', {'type': 'message_stop'});
+        await res.close();
+      } else { await _json(res, 200, result); }
+    } catch (e) {
+      status = 'error';
+      final error = anthropicError(e is BridgeException ? e.status : 502, '$e');
+      if (parsed.stream) { event('error', error); await res.close(); }
+      else { await _json(res, e is BridgeException ? e.status : 502, error); }
+    } finally {
+      ping?.cancel(); unawaited(subscription?.cancel());
+      reservation.settle(inputTokens: writer.usage.inputTokens, outputTokens: writer.usage.outputTokens);
+      await saveDevices(devices);
+      activeRequests--; _logEntry(device.name, parsed.modelId, status, writer.usage.outputTokens);
+    }
   }
 
   Future<void> _chat(HttpRequest req, PairedDevice device) async {
