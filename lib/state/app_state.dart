@@ -213,6 +213,9 @@ class AppState extends ChangeNotifier {
 
   Set<String>? hostAllowedTools;
   void applyHostAccess(Map<String, dynamic> snapshot) {
+    if (labRole == LabRole.relay && snapshot['serverTime'] is int) {
+      host.server.relay?.clockOffset = Duration(milliseconds: (snapshot['serverTime'] as int) - DateTime.now().toUtc().millisecondsSinceEpoch);
+    }
     final raw = (snapshot['access'] as Map?)?['tools'] as List?;
     final names = raw?.cast<String>().toSet();
     if (!setEquals(names, hostAllowedTools)) { hostAllowedTools = names; notifyListeners(); }
@@ -246,7 +249,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> selectModel(ProviderKind k, String m) async {
-    if (labRole == LabRole.client && k != ProviderKind.network) return;
+    if ((labRole == LabRole.client || labRole == LabRole.relay) && k != ProviderKind.network) return;
     provider = k;
     model = m;
     await storage.setSetting('provider', k.name);
@@ -255,7 +258,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> setLabRole(LabRole role) async {
-    if (role == LabRole.client) await host.stop();
+    if (labRole != role) await host.stop();
     labRole = role;
     await storage.setSetting('lab.role', role.name);
     notifyListeners();
@@ -363,7 +366,7 @@ class AppState extends ChangeNotifier {
   Future<void> _reply(Conversation c) async {
     _stopped = false;
     _bumpToTop(c);
-    if (labRole == LabRole.client) {
+    if (labRole == LabRole.client || labRole == LabRole.relay) {
       provider = ProviderKind.network;
       final models = providers[ProviderKind.network]!.models;
       if (!models.contains(model)) model = models.firstOrNull ?? '';
@@ -378,7 +381,7 @@ class AppState extends ChangeNotifier {
       streamingMessage = reply;
       notifyListeners();
 
-      if (labRole == LabRole.client && (!hasKey(ProviderKind.network) || model.isEmpty)) {
+      if ((labRole == LabRole.client || labRole == LabRole.relay) && (!hasKey(ProviderKind.network) || model.isEmpty)) {
         reply.error = 'Connect to Main and request access to a model first.';
         return _finish(c);
       }
@@ -390,7 +393,7 @@ class AppState extends ChangeNotifier {
       }
 
       final offered = demoMode ? const <ToolSpec>[] : tools.activeTools().where((tool) =>
-          labRole != LabRole.client || hostAllowedTools == null || hostAllowedTools!.contains(tool.name)).toList();
+          (labRole != LabRole.client && labRole != LabRole.relay) || hostAllowedTools == null || hostAllowedTools!.contains(tool.name)).toList();
       await _stream(reply, history, offered);
       if (_stopped || reply.toolCalls.isEmpty) return _finish(c);
       if (round + 1 >= maxToolRounds) {

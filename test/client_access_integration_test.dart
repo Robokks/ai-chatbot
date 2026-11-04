@@ -165,6 +165,14 @@ void main() {
     await expectLater(client.callTool(const CallToolRequest(name: 'list_models')), throwsA(anything));
   });
 
+  test('expiry interrupts an idle generation without another settings change', () async {
+    await host.updateAccess(alice, ClientAccess(expires: DateTime.now().add(const Duration(milliseconds: 500))));
+    backend.hold = Completer<void>();
+    final request = call('/v1/chat/completions', alice, body: prompt('local/one'));
+    expect((await request.timeout(const Duration(seconds: 2))).$1, 502);
+    expect(host.activeRequests, 0);
+  });
+
   test('new lab pairings wait for approval and cannot grant themselves access', () async {
     final request = await http.postUrl(Uri.parse('http://127.0.0.1:${host.port}/pair'));
     request.headers.contentType = ContentType.json;

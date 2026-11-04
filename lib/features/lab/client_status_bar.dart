@@ -76,7 +76,8 @@ class _ClientStatusBarState extends State<ClientStatusBar> {
     else {
       final limit = access?['requestsPerDay'] as int?;
       final remaining = limit == null ? '' : ' · ${max(0, limit - ((usage?['requests'] as int?) ?? 0))}/$limit requests left';
-      status = 'Connected to ${state.connectedHostName ?? 'Main'}$remaining'
+      final path = (_snapshot?['via'] as List? ?? []).map((v) => (v as Map)['name']).join(' → ');
+      status = 'Connected to ${_snapshot?['main'] ?? state.connectedHostName ?? 'Main'}${path.isEmpty ? '' : ' · via $path'}$remaining'
           '${expiry == null ? '' : ' · until ${expiry.toLocal()}'}';
     }
     return Material(color: Theme.of(context).colorScheme.surfaceContainerLow,

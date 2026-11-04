@@ -86,7 +86,7 @@ class _ModelList extends StatelessWidget {
     final p = Palette.of(context);
     final accent = Theme.of(context).colorScheme.primary;
     final available = ProviderKind.values.where(
-      (k) => state.labRole == LabRole.client ? k == ProviderKind.network
+      (k) => (state.labRole == LabRole.client || state.labRole == LabRole.relay) ? k == ProviderKind.network
           : k != ProviderKind.local || AppState.localSupported,
     );
     final kinds = [
@@ -105,7 +105,7 @@ class _ModelList extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
           child: Text('Choose a model', style: serif(context, size: 22)),
         ),
-        if (state.labRole != LabRole.client)
+        if (state.labRole != LabRole.client && state.labRole != LabRole.relay)
           for (final source in state.sources.all.where((s) => s.enabled)) ...[
             Padding(padding: const EdgeInsets.fromLTRB(8, 16, 8, 6), child: Text(source.name,
               style: const TextStyle(fontWeight: FontWeight.w600))),

@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../data/lab_role.dart';
 import '../../server/host_controller.dart';
 import '../../server/host_server.dart';
 import '../../state/app_state.dart';
@@ -37,8 +38,8 @@ class HostScreen extends StatelessWidget {
               SwitchListTile(
                 value: running,
                 onChanged: (v) => v ? host.start() : host.stop(),
-                title: const Text('Share AI on this Wi-Fi',
-                    style: TextStyle(fontWeight: FontWeight.w600)),
+                title: Text(state.labRole == LabRole.relay ? 'Relay Main to downstream PCs' : 'Share AI on the local network',
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
                 subtitle: Text(running
                     ? 'Running · ${host.server.devices.length} paired'
                         '${host.server.activeRequests > 0 ? ' · ${host.server.activeRequests} answering' : ''}'
@@ -57,9 +58,10 @@ class HostScreen extends StatelessWidget {
               const SectionTitle('Connect a device'),
               _ConnectCard(host: host),
             ],
-            const SectionTitle('Shared models'),
-            _SharedModels(host: host, state: state),
-            if (HostController.agentsSupported) ...[
+            if (state.labRole != LabRole.relay) ...[const SectionTitle('Shared models'), _SharedModels(host: host, state: state)],
+            if (state.labRole == LabRole.relay)
+              const NoteBox(icon: Icons.route, text: 'Pair downstream PCs with this PIN. Main sees their relay path and must approve each PC. Model and tool rules remain on Main.'),
+            if (HostController.agentsSupported && state.labRole != LabRole.relay) ...[
               const SectionTitle('Coding agents'),
               AgentsCard(hub: host.agents, error: host.server.mcpError),
             ],
@@ -67,8 +69,7 @@ class HostScreen extends StatelessWidget {
               const SectionTitle('For other apps'),
               _OtherApps(host: host),
             ],
-            const SectionTitle('Paired devices'),
-            _Devices(host: host),
+            if (state.labRole != LabRole.relay) ...[const SectionTitle('Paired devices'), _Devices(host: host)],
             if (host.server.log.isNotEmpty) ...[
               const SectionTitle('Recent requests'),
               _Log(entries: host.server.log),

@@ -14,6 +14,8 @@ import 'client_access.dart';
 import 'host_protocols.dart';
 import 'openai_bridge.dart';
 import 'anthropic_bridge.dart';
+import 'relay_protocol.dart';
+import 'relay_forwarder.dart';
 
 /// What the host needs from the app: which models it shares and how to
 /// reach them.
@@ -40,7 +42,8 @@ class PairedDevice {
     ClientUsage? usage,
     this.accessRequested = false,
     Map<String, String>? clientTools,
-  }) : created = created ?? DateTime.now(), access = access ?? ClientAccess(), usage = usage ?? ClientUsage(), clientTools = clientTools ?? {};
+    List<String>? via,
+  }) : created = created ?? DateTime.now(), access = access ?? ClientAccess(), usage = usage ?? ClientUsage(), clientTools = clientTools ?? {}, via = List.unmodifiable(via ?? const []);
 
   final String id;
   final String name;
@@ -51,6 +54,7 @@ class PairedDevice {
   final ClientUsage usage;
   bool accessRequested;
   final Map<String, String> clientTools;
+  final List<String> via;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -59,7 +63,7 @@ class PairedDevice {
         'created': created.toIso8601String(),
         'access': access.toJson(), 'usage': usage.toJson(),
         'accessRequested': accessRequested,
-        'clientTools': clientTools,
+        'clientTools': clientTools, 'via': via,
         if (lastSeen != null) 'lastSeen': lastSeen!.toIso8601String(),
       };
 
@@ -73,6 +77,7 @@ class PairedDevice {
         usage: ClientUsage.fromJson(Map<String, dynamic>.from(j['usage'] as Map? ?? {})),
         accessRequested: j['accessRequested'] as bool? ?? false,
         clientTools: (j['clientTools'] as Map?)?.map((k, v) => MapEntry('$k', '$v')),
+        via: (j['via'] as List?)?.cast<String>(),
       );
 }
 
@@ -109,6 +114,7 @@ class HostServer extends ChangeNotifier {
   final BuiltinToolSource? webTools;
   final bool Function(String)? webEnabled;
   final bool Function()? approvalsRequired;
+  bool _closing = false;
   bool _stopAll = false;
   bool get stopAll => _stopAll;
   set stopAll(bool value) {
@@ -129,6 +135,9 @@ class HostServer extends ChangeNotifier {
   static const maxPinAttempts = 5;
 
   HttpServer? _server;
+  RelayForwarder? relay;
+  final _relayReplay = RelayReplayCache();
+  final _relayTickets = <String, ({String id, String method, String path, DateTime expires})>{};
   Timer? _pinTimer;
   String? mcpError;
   HostMcpServer? _mcp;
@@ -172,6 +181,7 @@ class HostServer extends ChangeNotifier {
     bool mcp = true,
   }) async {
     if (running) return;
+    _closing = false;
     await loadClients();
     newPin();
     _server = await HttpServer.bind(address ?? InternetAddress.anyIPv4, port, shared: true);
@@ -180,6 +190,7 @@ class HostServer extends ChangeNotifier {
     mcpError = null;
     if (mcp) {
       final m = _mcp = HostMcpServer(
+        forward: relay?.handle,
         hostName: () => backend.deviceName,
         models: backend.sharedModels,
         run: runPrompt,
@@ -187,7 +198,7 @@ class HostServer extends ChangeNotifier {
           final d = authenticate(req);
           if (d != null) {
             d.lastSeen = DateTime.now();
-            try { d.access.check(stopped: stopAll, service: 'mcp'); } catch (_) { return false; }
+            try { _checkAccess(d, service: 'mcp'); } catch (_) { return false; }
           }
           return d != null;
         },
@@ -202,8 +213,7 @@ class HostServer extends ChangeNotifier {
         watchAccess: _watchAccess,
         checkTool: (id, tool) {
           final d = _deviceById(id);
-          d.access.check(stopped: stopAll, service: tool);
-          d.usage.reserve(d.access);
+          _reserveTool(d, tool);
           unawaited(saveDevices(devices));
         },
       );
@@ -225,8 +235,13 @@ class HostServer extends ChangeNotifier {
   }
 
   Future<void> stop() async {
+    _closing = true;
+    notifyListeners();
     _pinTimer?.cancel();
     _pinTimer = null;
+    relay?.close();
+    relay = null;
+    _relayTickets.clear();
     await _mcp?.stop();
     _mcp = null;
     await _stopAdvertising?.call();
@@ -247,6 +262,7 @@ class HostServer extends ChangeNotifier {
 
   /// Creates an access key for an app that can't pair with a PIN.
   Future<PairedDevice> createKey(String name) async {
+    if (devices.length >= 1000) throw BridgeException('Too many paired PCs. Remove unused keys first.', status: 429);
     final d = PairedDevice(id: _newKey().substring(4, 16), name: name, key: _newKey());
     devices.add(d);
     await saveDevices(devices);
@@ -265,11 +281,11 @@ class HostServer extends ChangeNotifier {
 
   Future<ToolOutput> _runWebTool(String id, String tool, Map<String, dynamic> args) async {
     final d = _deviceById(id);
-    d.access.check(stopped: stopAll, service: tool);
+    _checkAccess(d, service: tool);
     if (webTools == null || !(webEnabled?.call(tool) ?? true)) {
       throw BridgeException('This web tool is disabled on Main.', status: 403);
     }
-    final reservation = d.usage.reserve(d.access);
+    final reservation = _reserveTool(d, tool);
     await saveDevices(devices);
     final revoked = Completer<ToolOutput>();
     final unwatch = _watchAccess(id, tool, () {
@@ -278,23 +294,58 @@ class HostServer extends ChangeNotifier {
     var status = 'ok';
     try {
       final result = await Future.any([webTools!.call(tool, args), revoked.future]);
-      d.access.check(stopped: stopAll, service: tool);
+      _checkAccess(d, service: tool);
       status = result.isError ? 'error' : 'ok';
       return result;
     } catch (_) { status = 'error'; rethrow; }
     finally { unwatch(); reservation.settle(); _logEntry(d.name, tool, status, null); }
   }
 
+  void _checkAccess(PairedDevice device, {String? model, String? service}) {
+    if (_closing) throw BridgeException('Main stopped sharing.', status: 503);
+    device.access.check(stopped: stopAll, model: model, service: service);
+    for (final id in device.via) {
+      final parent = _deviceById(id);
+      parent.access.check(stopped: stopAll, model: model, service: service);
+      if (parent.access.services?.contains('relay') != true) throw BridgeException('An upstream relay is not allowed. Ask Main for access.', status: 403);
+    }
+  }
+  ClientReservation _reserveHierarchy(PairedDevice device, {Map<String, dynamic>? input}) {
+    final reservations = <ClientReservation>[];
+    try {
+      for (final d in [device, ...device.via.map(_deviceById)]) {
+        reservations.add(d.usage.reserve(d.access, input: input));
+      }
+    } catch (_) { for (final r in reservations.reversed) { r.cancelBeforeRun(); } rethrow; }
+    final result = reservations.first;
+    result.parents.addAll(reservations.skip(1));
+    return result;
+  }
+  ClientReservation _reserveTool(PairedDevice device, String tool) {
+    _checkAccess(device, service: tool);
+    return _reserveHierarchy(device);
+  }
+
   void refreshRules() => notifyListeners();
 
+  Timer? _expiryTimer(PairedDevice device, VoidCallback inspect) {
+    final expires = [device, ...device.via.map(_deviceById)].map((d) => d.access.expires).whereType<DateTime>().toList()..sort();
+    if (expires.isEmpty) return null;
+    final remaining = expires.first.difference(DateTime.now());
+    return Timer(remaining.isNegative ? Duration.zero : remaining, inspect);
+  }
   VoidCallback _watchAccess(String id, String service, VoidCallback onRevoked) {
+    Timer? expiry;
     void inspect() {
-      try { _deviceById(id).access.check(stopped: stopAll, service: service); }
-      catch (_) { onRevoked(); }
+      expiry?.cancel();
+      try {
+        final device = _deviceById(id);
+        _checkAccess(device, service: service);
+        expiry = _expiryTimer(device, inspect);
+      } catch (_) { onRevoked(); }
     }
-    addListener(inspect);
-    inspect();
-    return () => removeListener(inspect);
+    addListener(inspect); inspect();
+    return () { expiry?.cancel(); removeListener(inspect); };
   }
 
   Stream<ChatDelta> _guarded(Stream<ChatDelta> source, PairedDevice device,
@@ -302,17 +353,22 @@ class HostServer extends ChangeNotifier {
     late StreamController<ChatDelta> out;
     StreamSubscription<ChatDelta>? subscription;
     var finished = false;
+    Timer? expiry;
     void fail(Object error) {
       if (finished) return;
       finished = true;
+      expiry?.cancel();
       out.addError(error);
       unawaited(subscription?.cancel());
       unawaited(out.close());
     }
     void inspect() {
+      expiry?.cancel();
+      if (finished) return;
       try {
-        _deviceById(device.id).access.check(stopped: stopAll, model: model, service: service);
+        _checkAccess(_deviceById(device.id), model: model, service: service);
         if (!backend.sharedModels().any((m) => m.id == model)) throw BridgeException('This model is no longer shared.', status: 403);
+        expiry = _expiryTimer(device, inspect);
       }
       catch (e) { fail(e); }
     }
@@ -324,7 +380,7 @@ class HostServer extends ChangeNotifier {
         inspect();
         if (!finished) out.add(delta);
       }, onError: fail, onDone: () { if (!finished) { finished = true; unawaited(out.close()); } });
-    }, onCancel: () { removeListener(inspect); unawaited(subscription?.cancel()); });
+    }, onCancel: () { expiry?.cancel(); removeListener(inspect); unawaited(subscription?.cancel()); });
     return out.stream;
   }
 
@@ -363,19 +419,19 @@ class HostServer extends ChangeNotifier {
   }
 
   List<SharedModel> modelsFor(PairedDevice device) {
-    device.access.check(stopped: stopAll);
-    return backend.sharedModels().where((m) => device.access.models == null ||
-        device.access.models!.contains(m.id)).toList();
+    _checkAccess(device);
+    return backend.sharedModels().where((m) => [device, ...device.via.map(_deviceById)]
+        .every((d) => d.access.models == null || d.access.models!.contains(m.id))).toList();
   }
 
   Future<ClientReservation> _reserve(PairedDevice device, String model, String service,
       Map<String, dynamic> input) async {
-    device.access.check(stopped: stopAll, model: model, service: service);
+    _checkAccess(device, model: model, service: service);
     if (!backend.sharedModels().any((m) => m.id == model)) {
       throw BridgeException('Model "$model" is not shared by this host', status: 404, code: 'model_not_found');
     }
-    final reservation = device.usage.reserve(device.access, input: input);
-    await saveDevices(devices);
+    final reservation = _reserveHierarchy(device, input: input);
+    try { await saveDevices(devices); } catch (_) { reservation.cancelBeforeRun(); rethrow; }
     notifyListeners();
     return reservation;
   }
@@ -413,11 +469,13 @@ class HostServer extends ChangeNotifier {
         });
       }
       if (req.method == 'POST' && path == '/pair') return await _pair(req);
+      if (relay != null) return await relay!.handle(req);
       if (req.method == 'GET' && path == '/.well-known/agent-card.json') {
         return await _json(res, 200, a2aAgentCard(
           origin: req.requestedUri.origin,
           hostName: backend.deviceName,
-          models: (approvalsRequired?.call() ?? false) ? const [] : backend.sharedModels(),
+          models: authenticate(req) != null ? modelsFor(authenticate(req)!)
+              : (approvalsRequired?.call() ?? false) ? const [] : backend.sharedModels(),
         ));
       }
 
@@ -435,7 +493,10 @@ class HostServer extends ChangeNotifier {
       if (req.method == 'GET' && path == '/access') {
         device.usage.refresh();
         return await _json(res, 200, {
-          'device': device.name, 'access': device.access.toJson(),
+          'id': device.id, 'device': device.name, 'main': backend.deviceName,
+          'serverTime': DateTime.now().toUtc().millisecondsSinceEpoch,
+          'via': [for (final id in device.via) {'id': id, 'name': devices.where((d) => d.id == id).firstOrNull?.name ?? 'Unavailable relay'}],
+          'access': device.access.toJson(),
           'usage': device.usage.toJson(), 'stopped': stopAll, 'mcpPort': mcpPort,
           'models': device.access.models?.toList(),
         });
@@ -460,7 +521,13 @@ class HostServer extends ChangeNotifier {
         notifyListeners();
         return await _json(res, 202, {'message': 'Access requested. Waiting for Main.'});
       }
-      device.access.check(stopped: stopAll);
+      if (req.method == 'POST' && path == '/relay') return await _relayRequest(req, device);
+      if (req.method == 'GET' && path == '/relay/clients') {
+        _checkRelay(device);
+        return await _json(res, 200, {'clients': [for (final child in devices.where((d) => d.via.contains(device.id)))
+          {'id': child.id, 'name': child.name, 'access': child.access.toJson(), 'via': child.via}]});
+      }
+      _checkAccess(device);
 
       if (req.method == 'GET' && (path == '/v1/models' || path == '/models')) {
         return await _json(res, 200, modelsResponse(modelsFor(device)));
@@ -499,7 +566,15 @@ class HostServer extends ChangeNotifier {
     if (auth != null && auth.toLowerCase().startsWith('bearer ')) token = auth.substring(7).trim();
     if (token == null || token.isEmpty) return null;
     for (final d in devices) {
-      if (_constantTimeEquals(d.key, token)) return d;
+      if (_constantTimeEquals(d.key, token)) {
+        if (d.via.isNotEmpty) {
+          final ticket = _relayTickets[req.headers.value('x-chatbot-relay-ticket')];
+          if (req.connectionInfo?.remoteAddress.isLoopback != true || ticket == null ||
+              ticket.id != d.id || ticket.method != req.method || ticket.path != req.uri.toString() ||
+              !DateTime.now().isBefore(ticket.expires)) { return null; }
+        }
+        return d;
+      }
     }
     return null;
   }
@@ -550,6 +625,11 @@ class HostServer extends ChangeNotifier {
         'error': {'message': 'Wrong PIN', 'type': 'authentication_error'},
       });
     }
+    if (relay != null) {
+      if (await relay!.register(res, (name == null || name.isEmpty) ? 'Device' : name.substring(0, min(name.length, 60)))) { newPin(); }
+      return;
+    }
+    if (devices.length >= 1000) throw BridgeException('Too many paired PCs. Remove unused keys first.', status: 429);
     final device = PairedDevice(
       id: _newKey().substring(4, 16),
       name: (name == null || name.isEmpty) ? 'Device' : name.substring(0, min(name.length, 60)),
@@ -561,6 +641,57 @@ class HostServer extends ChangeNotifier {
     await saveDevices(devices);
     newPin();
     await _json(res, 200, {'key': device.key, 'name': backend.deviceName});
+  }
+
+  void _checkRelay(PairedDevice device) {
+    _checkAccess(device, service: 'relay');
+    if (device.access.services?.contains('relay') != true) throw BridgeException('Main must explicitly allow relay forwarding for this PC.', status: 403);
+  }
+  Future<void> _relayRequest(HttpRequest req, PairedDevice outer) async {
+    _checkRelay(outer);
+    final envelope = RelayEnvelope.fromJson(Map<String, dynamic>.from(jsonDecode(utf8.decode(await relayBytes(req))) as Map));
+    validateRelayPayload(envelope.payload);
+    if (envelope.hops.isEmpty || envelope.hops.last.id != outer.id) throw BridgeException('Relay identity mismatch', status: 403);
+    envelope.verify((id) {
+      final d = _deviceById(id); _checkRelay(d);
+      return RelayIdentity(d.id, d.key, d.via);
+    }, _relayReplay);
+    final payload = envelope.payload;
+    if (payload['kind'] == 'register') {
+      if (devices.length >= 1000) throw BridgeException('Too many paired PCs. Remove unused keys first.', status: 429);
+      final child = PairedDevice(id: _newKey().substring(4, 16), key: _newKey(),
+        name: payload['name'] as String, access: ClientAccess(approved: false),
+        accessRequested: true, via: envelope.path);
+      devices.add(child); await saveDevices(devices); notifyListeners();
+      return _json(req.response, 200, {'key': child.key, 'name': backend.deviceName});
+    }
+    final key = payload['key'] as String;
+    final child = devices.where((d) => _constantTimeEquals(d.key, key)).firstOrNull;
+    if (child == null || !listEquals(child.via, envelope.path)) throw BridgeException('This PC must connect through its approved relay path.', status: 403);
+    final target = Uri.parse(payload['path'] as String);
+    final destinationPort = target.path == '/mcp' ? mcpPort : port;
+    if (destinationPort == null) throw BridgeException('MCP is unavailable on Main.', status: 503);
+    final bytes = base64Decode(payload['body'] as String);
+    if (bytes.length > maxBodyBytes) throw BridgeException('Request too large', status: 413);
+    _relayTickets.removeWhere((_, t) => !DateTime.now().isBefore(t.expires));
+    if (_relayTickets.length >= 1024) throw BridgeException('Main is busy. Try again.', status: 429);
+    final ticket = _newKey();
+    _relayTickets[ticket] = (id: child.id, method: payload['method'] as String, path: target.toString(), expires: DateTime.now().add(const Duration(minutes: 1)));
+    final client = HttpClient()..autoUncompress = false;
+    try {
+      final proxy = await client.openUrl(payload['method'] as String,
+          Uri(scheme: 'http', host: '127.0.0.1', port: destinationPort, path: target.path, query: target.query.isEmpty ? null : target.query));
+      proxy.followRedirects = false;
+      for (final header in (payload['headers'] as Map).entries) { proxy.headers.set(header.key as String, header.value); }
+      proxy.headers.set('authorization', 'Bearer $key'); proxy.headers.set('x-chatbot-relay-ticket', ticket);
+      proxy.add(bytes);
+      final response = await proxy.close();
+      req.response.statusCode = response.statusCode;
+      response.headers.forEach((name, values) { if (!hopHeaders.contains(name.toLowerCase())) req.response.headers.set(name, values); });
+      req.response.bufferOutput = false;
+      unawaited(req.response.done.catchError((_) { client.close(force: true); }));
+      await req.response.addStream(response); await req.response.close();
+    } finally { _relayTickets.remove(ticket); client.close(force: true); }
   }
 
   Future<void> _messages(HttpRequest req, PairedDevice device) async {

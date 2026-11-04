@@ -98,22 +98,37 @@ class ClientUsage {
 }
 
 class ClientReservation {
-  ClientReservation(this.usage, this.day, this.previous, this.maxOutputTokens, this.active);
+  ClientReservation(this.usage, this.day, this.previous, this._maximum, this.active);
   final ClientUsage usage;
   final String day;
   final int previous;
-  final int? maxOutputTokens;
+  final int? _maximum;
+  final List<ClientReservation> parents = [];
+  int? get maxOutputTokens {
+    final values = [_maximum, ...parents.map((p) => p.maxOutputTokens)].whereType<int>().toList();
+    if (values.isEmpty) return null;
+    return values.reduce((a, b) => a < b ? a : b);
+  }
   final bool active;
   bool _settled = false;
+
+  void cancelBeforeRun() {
+    if (_settled) return;
+    _settled = true;
+    for (final parent in parents) { parent.cancelBeforeRun(); }
+    if (active) usage._active--;
+    if (usage.day == day) { usage.requests--; if (_maximum != null) usage.tokens = previous; }
+  }
 
   void settle({int? inputTokens, int? outputTokens}) {
     if (_settled) return;
     _settled = true;
+    for (final parent in parents) { parent.settle(inputTokens: inputTokens, outputTokens: outputTokens); }
     if (active) usage._active--;
     if (usage.day != day) return;
     if (inputTokens != null && outputTokens != null) {
       final actual = inputTokens.clamp(0, 1 << 50) + outputTokens.clamp(0, 1 << 50);
-      if (maxOutputTokens != null) { usage.tokens = previous + actual; }
+      if (_maximum != null) { usage.tokens = previous + actual; }
       else { usage.tokens += actual; }
     }
   }

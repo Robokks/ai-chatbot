@@ -51,6 +51,8 @@ class ClientsScreen extends StatelessWidget {
                 : device.lastSeen == null ? 'Approved · not connected yet' : 'Last seen ${device.lastSeen!.toLocal()}',
               ), trailing: TextButton(onPressed: () => showDialog<void>(context: context,
                 builder: (_) => _RulesDialog(server: host.server, device: device)), child: const Text('Rules'))),
+              if (device.via.isNotEmpty) Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text('Via ${device.via.map((id) => host.server.devices.where((d) => d.id == id).firstOrNull?.name ?? 'Unavailable relay').join(' → ')}')),
               Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text(
                 '${device.usage.day == ClientUsage.dayFor(DateTime.now()) ? device.usage.requests : 0} requests · '
                 '${device.usage.day == ClientUsage.dayFor(DateTime.now()) ? device.usage.tokens : 0} tokens today')),
@@ -90,7 +92,7 @@ class _RulesDialogState extends State<_RulesDialog> {
   Duration? _expiry = const Duration(days: 1);
   bool _saving = false;
   String? _error;
-  static const _labels = {'chat': 'Chat / UTCP', 'mcp': 'MCP connection', 'a2a': 'A2A', 'claude_code': 'Claude Code', 'codex': 'Codex', 'web_search': 'Web search through Main', 'read_web_page': 'Read web pages through Main'};
+  static const _labels = {'chat': 'Chat / UTCP', 'mcp': 'MCP connection', 'a2a': 'A2A', 'claude_code': 'Claude Code', 'codex': 'Codex', 'relay': 'Relay forwarding', 'web_search': 'Web search through Main', 'read_web_page': 'Read web pages through Main'};
   String? _validate(String? value) {
     if (value == null || value.trim().isEmpty) return null;
     final n = int.tryParse(value.trim());

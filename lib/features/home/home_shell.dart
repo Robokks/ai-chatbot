@@ -49,7 +49,7 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width >= _wideBreakpoint;
     final state = AppScope.of(context);
-    final pages = state.labRole == LabRole.client ? [0, 3, 5] : [0, 1, 2, 3, 4, 5];
+    final pages = (state.labRole == LabRole.client || state.labRole == LabRole.relay) ? [0, 3, 5] : [0, 1, 2, 3, 4, 5];
 
     final Widget content;
     if (wide) {

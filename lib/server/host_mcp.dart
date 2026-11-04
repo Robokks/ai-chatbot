@@ -54,8 +54,10 @@ class HostMcpServer {
     this.watchAccess,
     this.webTools = const [],
     this.runWebTool,
+    this.forward,
   });
 
+  final Future<void> Function(HttpRequest)? forward;
   final String Function() hostName;
   final List<SharedModel> Function() models;
   final RunPrompt run;
@@ -282,6 +284,7 @@ class HostMcpServer {
   }
 
   Future<void> _handle(HttpRequest request) async {
+    if (forward != null) { await forward!(request); return; }
     HttpClient? client;
     try {
       if (_stopping || request.uri.path != '/mcp') {

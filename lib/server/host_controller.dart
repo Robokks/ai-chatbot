@@ -14,6 +14,10 @@ import 'discovery.dart';
 import 'foreground.dart';
 import 'host_server.dart';
 import 'openai_bridge.dart';
+import 'client_access.dart';
+import 'client_connection.dart';
+import 'relay_forwarder.dart';
+import 'relay_protocol.dart';
 
 /// Host mode: shares this device's models with the user's other devices.
 class HostController extends ChangeNotifier implements HostBackend, HostModelBackend {
@@ -155,17 +159,39 @@ class HostController extends ChangeNotifier implements HostBackend, HostModelBac
       : '${addresses.first}:${server.port}';
 
   Future<void> start() async {
+    if (server.running) return;
     error = null;
-    if (agentsSupported) await agents.ensureDetected();
     try {
+      if (app.labRole == LabRole.client) throw StateError('Choose Relay in Settings to share Main with downstream PCs.');
+      if (app.labRole == LabRole.relay) {
+        if (!app.hasKey(ProviderKind.network)) throw StateError('Connect to Main before starting a relay.');
+        final settings = app.providers[ProviderKind.network]!;
+        final key = app.keyFor(ProviderKind.network);
+        final connection = ClientConnection(settings.baseUrl, key);
+        try {
+          final access = await connection.access();
+          final policy = ClientAccess.fromJson(Map<String, dynamic>.from(access['access'] as Map));
+          policy.check(stopped: access['stopped'] == true, service: 'relay');
+          if (policy.services?.contains('relay') != true) throw StateError('Main must allow Relay forwarding for this PC in Clients → Rules.');
+          if (access['id'] is! String || access['serverTime'] is! int) throw StateError('Update Main before using relay mode.');
+          server.relay = RelayForwarder(upstream: Uri.parse(settings.baseUrl),
+            identity: RelayIdentity(access['id'] as String, key,
+              (access['via'] as List? ?? []).map((v) => (v as Map)['id'] as String).toList()),
+            clockOffset: Duration(milliseconds: (access['serverTime'] as int) - DateTime.now().toUtc().millisecondsSinceEpoch),
+            mcpPort: () => server.mcpPort);
+        } finally { connection.close(); }
+      } else if (agentsSupported) { await agents.ensureDetected(); }
       await server.start(port: port);
       addresses = await HostServer.localAddresses();
       if (addresses.isEmpty) {
-        error = 'No Wi-Fi network found. Connect this device to Wi-Fi.';
+        error = 'No local network address found. Connect this PC to Ethernet or Wi-Fi.';
       }
       await HostForegroundService.start(primaryAddress ?? 'this device');
     } on SocketException catch (e) {
       error = 'Could not start the server on port $port (${e.osError?.message ?? e.message}).';
+      await server.stop();
+    } catch (e) {
+      error = '$e';
       await server.stop();
     }
     notifyListeners();
