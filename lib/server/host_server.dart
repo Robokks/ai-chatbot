@@ -38,7 +38,8 @@ class PairedDevice {
     ClientAccess? access,
     ClientUsage? usage,
     this.accessRequested = false,
-  }) : created = created ?? DateTime.now(), access = access ?? ClientAccess(), usage = usage ?? ClientUsage();
+    Map<String, String>? clientTools,
+  }) : created = created ?? DateTime.now(), access = access ?? ClientAccess(), usage = usage ?? ClientUsage(), clientTools = clientTools ?? {};
 
   final String id;
   final String name;
@@ -48,6 +49,7 @@ class PairedDevice {
   ClientAccess access;
   final ClientUsage usage;
   bool accessRequested;
+  final Map<String, String> clientTools;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -56,6 +58,7 @@ class PairedDevice {
         'created': created.toIso8601String(),
         'access': access.toJson(), 'usage': usage.toJson(),
         'accessRequested': accessRequested,
+        'clientTools': clientTools,
         if (lastSeen != null) 'lastSeen': lastSeen!.toIso8601String(),
       };
 
@@ -68,6 +71,7 @@ class PairedDevice {
         access: ClientAccess.fromJson(Map<String, dynamic>.from(j['access'] as Map? ?? {})),
         usage: ClientUsage.fromJson(Map<String, dynamic>.from(j['usage'] as Map? ?? {})),
         accessRequested: j['accessRequested'] as bool? ?? false,
+        clientTools: (j['clientTools'] as Map?)?.map((k, v) => MapEntry('$k', '$v')),
       );
 }
 
@@ -432,6 +436,20 @@ class HostServer extends ChangeNotifier {
           'models': device.access.models?.toList(),
         });
       }
+      if (req.method == 'POST' && path == '/access/tools') {
+        final body = await _readJson(req);
+        final tools = body['tools'];
+        if (tools is! Map || tools.length > 500 || tools.entries.any((e) =>
+            e.key is! String || !RegExp(r'^[A-Za-z0-9_-]{1,64}$').hasMatch(e.key as String) || e.value is! String)) {
+          throw BridgeException('Invalid client tool list');
+        }
+        final names = tools.map((k, v) => MapEntry(k as String, (v as String).substring(0, min((v).length, 200))));
+        if (!mapEquals(names, device.clientTools)) {
+          device.clientTools..clear()..addAll(names);
+          await saveDevices(devices); notifyListeners();
+        }
+        return await _json(res, 200, {'message': 'Tool list updated'});
+      }
       if (req.method == 'POST' && path == '/access/request') {
         device.accessRequested = true;
         await saveDevices(devices);
@@ -544,6 +562,9 @@ class HostServer extends ChangeNotifier {
     final res = req.response;
     final body = await _readJson(req);
     final parsed = parseChatRequest(body);
+    if (device.access.tools != null && parsed.tools.any((t) => !device.access.tools!.contains(t.name))) {
+      throw BridgeException('This chat offers tools that Main has not allowed. Refresh access or ask Main to allow them.', status: 403, code: 'tool_not_allowed');
+    }
     final route = SharedModel.parseId(parsed.modelId);
     final shared = backend.sharedModels();
     if (route == null || !shared.any((m) => m.id == parsed.modelId)) {

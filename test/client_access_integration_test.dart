@@ -86,6 +86,19 @@ void main() {
     expect((await call('/access', bob)).$2['stopped'], isTrue);
   });
 
+  test('client-reported tools do not grant permissions and unallowed tool schemas are rejected', () async {
+    await host.updateAccess(alice, ClientAccess(tools: {}));
+    expect((await call('/access/tools', alice, body: {'tools': {'local_git_run': 'Git on this PC'}})).$1, 200);
+    expect(alice.clientTools, {'local_git_run': 'Git on this PC'});
+    expect(alice.access.tools, isEmpty);
+    final body = prompt('local/one')..['tools'] = [{'type': 'function',
+      'function': {'name': 'local_git_run', 'description': 'Git', 'parameters': {'type': 'object'}}}];
+    expect((await call('/v1/chat/completions', alice, body: body)).$1, 403);
+    await host.updateAccess(alice, ClientAccess(tools: {'local_git_run'}));
+    expect((await call('/v1/chat/completions', alice, body: body)).$1, 200);
+    expect((await call('/access/tools', alice, body: {'tools': {'bad name': 'x'}})).$1, 400);
+  });
+
   test('two simultaneous MCP clients get their own allowed models and default route', () async {
     await host.updateAccess(alice, ClientAccess(models: {'local/one'}));
     await host.updateAccess(bob, ClientAccess(models: {'openai/two'}));

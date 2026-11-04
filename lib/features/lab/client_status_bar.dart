@@ -40,8 +40,12 @@ class _ClientStatusBarState extends State<ClientStatusBar> {
       final snapshot = await connection.access();
       if (!mounted || connection != _connection) return;
       setState(() { _snapshot = snapshot; _error = null; });
+      final state = AppScope.read(context);
+      state.applyHostAccess(snapshot);
+      try { await connection.reportTools({for (final tool in state.tools.activeTools()) tool.name: tool.sourceLabel}); } catch (_) {}
+      if (!mounted || connection != _connection) return;
       if (snapshot['stopped'] != true && (snapshot['access'] as Map?)?['approved'] == true) {
-        try { await AppScope.read(context).refreshHostModels(); } catch (_) {}
+        try { await state.refreshHostModels(); } catch (_) {}
       }
     } catch (_) { if (mounted) setState(() => _error = 'Cannot reach Main. Check the connection.'); }
     finally { if (mounted) setState(() => _busy = false); }

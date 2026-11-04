@@ -211,6 +211,13 @@ class AppState extends ChangeNotifier {
     } finally { connection.close(); }
   }
 
+  Set<String>? hostAllowedTools;
+  void applyHostAccess(Map<String, dynamic> snapshot) {
+    final raw = (snapshot['access'] as Map?)?['tools'] as List?;
+    final names = raw?.cast<String>().toSet();
+    if (!setEquals(names, hostAllowedTools)) { hostAllowedTools = names; notifyListeners(); }
+  }
+
   /// Refreshes the shared model list from the paired host.
   Future<void> refreshHostModels() async {
     final s = providers[ProviderKind.network]!;
@@ -382,7 +389,8 @@ class AppState extends ChangeNotifier {
         return _finish(c);
       }
 
-      final offered = demoMode ? const <ToolSpec>[] : tools.activeTools();
+      final offered = demoMode ? const <ToolSpec>[] : tools.activeTools().where((tool) =>
+          labRole != LabRole.client || hostAllowedTools == null || hostAllowedTools!.contains(tool.name)).toList();
       await _stream(reply, history, offered);
       if (_stopped || reply.toolCalls.isEmpty) return _finish(c);
       if (round + 1 >= maxToolRounds) {
@@ -396,7 +404,12 @@ class AppState extends ChangeNotifier {
       for (final call in reply.toolCalls) {
         if (_stopped) break;
         final spec = offered.where((t) => t.name == call.name).firstOrNull;
-        if (spec != null && spec.needsApproval && !await _askApproval(call, spec)) {
+        if (spec == null) {
+          results.add(ToolResult(callId: call.id, name: call.name,
+              text: 'This tool was not offered or allowed for this chat.', isError: true));
+          continue;
+        }
+        if (spec.needsApproval && !await _askApproval(call, spec)) {
           results.add(ToolResult(
               callId: call.id,
               name: call.name,
@@ -404,7 +417,7 @@ class AppState extends ChangeNotifier {
               isError: true));
           continue;
         }
-        streamingStatus = 'Running ${spec?.sourceLabel ?? call.name}…';
+        streamingStatus = 'Running ${spec.sourceLabel}…';
         notifyListeners();
         results.add(await tools.execute(call, onProgress: (m) {
           streamingStatus = m;

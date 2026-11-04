@@ -20,5 +20,11 @@ class ClientConnection {
     }
     return Map<String, dynamic>.from(jsonDecode(response.body) as Map);
   }
+  Future<void> reportTools(Map<String, String> tools) async {
+    final response = await _client.post(base.replace(path: '/access/tools', query: '', fragment: ''),
+      headers: {'authorization': 'Bearer $key', 'content-type': 'application/json'},
+      body: jsonEncode({'tools': tools})).timeout(const Duration(seconds: 10));
+    if (response.statusCode != 200) throw LlmException('Could not send the tool list to Main.', statusCode: response.statusCode);
+  }
   void close() => _client.close();
 }

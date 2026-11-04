@@ -5,13 +5,14 @@ import 'openai_bridge.dart';
 /// Main's saved rules. Null allowlists/limits mean unrestricted, empty lists deny.
 class ClientAccess {
   ClientAccess({this.approved = true, this.blocked = false, this.expires,
-    this.models, this.services, this.requestsPerDay, this.tokensPerDay});
+    this.models, this.services, this.tools, this.requestsPerDay, this.tokensPerDay});
 
   bool approved;
   bool blocked;
   DateTime? expires;
   Set<String>? models;
   Set<String>? services;
+  Set<String>? tools;
   int? requestsPerDay;
   int? tokensPerDay;
 
@@ -34,6 +35,7 @@ class ClientAccess {
     if (expires != null) 'expires': expires!.toIso8601String(),
     if (models != null) 'models': models!.toList(),
     if (services != null) 'services': services!.toList(),
+    if (tools != null) 'tools': tools!.toList(),
     if (requestsPerDay != null) 'requestsPerDay': requestsPerDay,
     if (tokensPerDay != null) 'tokensPerDay': tokensPerDay,
   };
@@ -44,6 +46,7 @@ class ClientAccess {
     expires: j['expires'] == null ? null : DateTime.parse(j['expires'] as String),
     models: j['models'] == null ? null : Set<String>.from(j['models'] as List),
     services: j['services'] == null ? null : Set<String>.from(j['services'] as List),
+    tools: j['tools'] == null ? null : Set<String>.from(j['tools'] as List),
     requestsPerDay: j['requestsPerDay'] as int?, tokensPerDay: j['tokensPerDay'] as int?,
   );
 }

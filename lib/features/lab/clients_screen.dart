@@ -12,6 +12,7 @@ class ClientsScreen extends StatelessWidget {
   Future<void> _approve(HostServer server, PairedDevice device, Duration? duration) =>
       server.updateAccess(device, ClientAccess(
         models: device.access.models ?? server.backend.sharedModels().map((m) => m.id).toSet(),
+        tools: device.access.tools,
         services: device.access.services ?? {'chat', 'mcp', 'a2a'},
         expires: duration == null ? null : DateTime.now().add(duration),
         requestsPerDay: device.access.requestsPerDay ?? 500,
@@ -84,6 +85,8 @@ class _RulesDialogState extends State<_RulesDialog> {
   late final _tokens = TextEditingController(text: widget.device.access.tokensPerDay?.toString() ?? '');
   late final _models = widget.device.access.models?.toSet() ?? widget.server.backend.sharedModels().map((m) => m.id).toSet();
   late final _services = widget.device.access.services?.toSet() ?? {'chat', 'mcp', 'a2a'};
+  late bool _allTools = widget.device.access.tools == null;
+  late final _tools = widget.device.access.tools?.toSet() ?? <String>{};
   Duration? _expiry = const Duration(days: 1);
   bool _saving = false;
   String? _error;
@@ -101,7 +104,7 @@ class _RulesDialogState extends State<_RulesDialog> {
       await widget.server.updateAccess(widget.device, ClientAccess(
         approved: true, blocked: widget.device.access.blocked,
         expires: _expiry == null ? null : DateTime.now().add(_expiry!),
-        models: _models, services: _services,
+        models: _models, services: _services, tools: _allTools ? null : _tools,
         requestsPerDay: int.tryParse(_requests.text.trim()), tokensPerDay: int.tryParse(_tokens.text.trim()),
       ));
       if (mounted) Navigator.pop(context);
@@ -135,6 +138,15 @@ class _RulesDialogState extends State<_RulesDialog> {
         for (final entry in _labels.entries)
           CheckboxListTile(title: Text(entry.value), value: _services.contains(entry.key),
             onChanged: (v) => setState(() { v == true ? _services.add(entry.key) : _services.remove(entry.key); })),
+        const SizedBox(height: 16), const Text('Tools on the client PC'),
+        CheckboxListTile(title: const Text('Allow all client tools'), value: _allTools,
+          onChanged: (v) => setState(() => _allTools = v == true)),
+        if (!_allTools) ...[
+          if (widget.device.clientTools.isEmpty) const Text('The client has not reported its tools yet. No client tools will be allowed.'),
+          for (final tool in widget.device.clientTools.entries)
+            CheckboxListTile(title: Text(tool.key), subtitle: Text(tool.value), value: _tools.contains(tool.key),
+              onChanged: (v) => setState(() { v == true ? _tools.add(tool.key) : _tools.remove(tool.key); })),
+        ],
         if (_error != null) Text(_error!),
       ],
     )))),
