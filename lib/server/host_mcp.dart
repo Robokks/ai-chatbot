@@ -54,6 +54,9 @@ class HostMcpServer {
     this.watchAccess,
     this.webTools = const [],
     this.runWebTool,
+    this.extraTools = const [],
+    this.extraToolsFor,
+    this.runExtraTool,
     this.forward,
   });
 
@@ -68,20 +71,30 @@ class HostMcpServer {
   final String? Function(HttpRequest)? identify;
   final String Function(String)? deviceNameFor;
   final List<SharedModel> Function(String)? modelsForIdentity;
-  final Future<(String, String)> Function(String, String?, String, String?)? runForIdentity;
+  final Future<(String, String)> Function(String, String?, String, String?)?
+  runForIdentity;
+  final List<SourceTool> extraTools;
+  final List<SourceTool> Function()? extraToolsFor;
+  List<SourceTool> get _currentExtraTools =>
+      extraToolsFor?.call() ?? extraTools;
+  final Future<ToolOutput> Function(String, String, Map<String, dynamic>)?
+  runExtraTool;
   final List<SourceTool> webTools;
-  final Future<ToolOutput> Function(String, String, Map<String, dynamic>)? runWebTool;
+  final Future<ToolOutput> Function(String, String, Map<String, dynamic>)?
+  runWebTool;
   final void Function(String, String)? checkTool;
   final VoidCallback Function(String, String, VoidCallback)? watchAccess;
   HttpServer? _server;
   final Map<String, Future<StreamableMcpServer>> _clients = {};
   final Set<HttpClient> _connections = {};
+  final Map<String, String> _toolFingerprints = {};
   bool _stopping = false;
 
   int? get port => _server?.port;
 
   McpServer _build(String identity) {
-    List<SharedModel> allowedModels() => modelsForIdentity?.call(identity) ?? models();
+    List<SharedModel> allowedModels() =>
+        modelsForIdentity?.call(identity) ?? models();
     final server = McpServer(
       Implementation(name: 'chatbot-host', version: '1.0.0'),
       options: const McpServerOptions(
@@ -131,7 +144,8 @@ class HostMcpServer {
         try {
           final runner = runForIdentity == null
               ? run
-              : (String? m, String p, String? s) => runForIdentity!(identity, m, p, s);
+              : (String? m, String p, String? s) =>
+                    runForIdentity!(identity, m, p, s);
           final (text, model) = await runner(
             args['model'] as String?,
             args['prompt'] as String,
@@ -150,13 +164,58 @@ class HostMcpServer {
       },
     );
     for (final tool in webTools) {
-      server.registerTool(tool.name, description: tool.description,
-        inputSchema: JsonSchema.fromJson(tool.inputSchema) as ToolInputSchema, callback: (args, extra) async {
+      server.registerTool(
+        tool.name,
+        description: tool.description,
+        inputSchema: JsonSchema.fromJson(tool.inputSchema) as ToolInputSchema,
+        callback: (args, extra) async {
           try {
             final result = await runWebTool!(identity, tool.name, args);
-            return CallToolResult(content: [TextContent(text: result.text)], isError: result.isError);
-          } catch (e) { return CallToolResult(content: [TextContent(text: '$e')], isError: true); }
-        });
+            return CallToolResult(
+              content: [TextContent(text: result.text)],
+              isError: result.isError,
+            );
+          } catch (e) {
+            return CallToolResult(
+              content: [TextContent(text: '$e')],
+              isError: true,
+            );
+          }
+        },
+      );
+    }
+    for (final tool in _currentExtraTools) {
+      server.registerTool(
+        tool.name,
+        description: tool.description,
+        annotations: ToolAnnotations(destructiveHint: true),
+        inputSchema: JsonSchema.fromJson(tool.inputSchema) as ToolInputSchema,
+        callback: (args, extra) async {
+          var n = 0;
+          final ticker = Timer.periodic(const Duration(seconds: 15), (_) {
+            extra
+                .sendProgress(
+                  (++n).toDouble(),
+                  message: 'Waiting for Main approval or LabVIEW result',
+                )
+                .catchError((_) {});
+          });
+          try {
+            final result = await runExtraTool!(identity, tool.name, args);
+            return CallToolResult(
+              content: [TextContent(text: result.text)],
+              isError: result.isError,
+            );
+          } catch (e) {
+            return CallToolResult(
+              content: [TextContent(text: '$e')],
+              isError: true,
+            );
+          } finally {
+            ticker.cancel();
+          }
+        },
+      );
     }
     _registerAgents(server, identity);
     return server;
@@ -165,7 +224,8 @@ class HostMcpServer {
   void _registerAgents(McpServer server, String identity) {
     final host = agents;
     if (host == null) return;
-    final deviceName = deviceNameFor?.call(identity) ?? device?.call() ?? 'A paired device';
+    final deviceName =
+        deviceNameFor?.call(identity) ?? device?.call() ?? 'A paired device';
     final settings = host.agentSettings;
     if (settings.folders.isEmpty) return;
     for (final agent in host.availableAgents) {
@@ -239,7 +299,9 @@ class HostMcpServer {
           final subscription = extra.signal.onAbort.listen((_) {
             if (!cancelled.isCompleted) cancelled.complete();
           });
-          if (extra.signal.aborted && !cancelled.isCompleted) cancelled.complete();
+          if (extra.signal.aborted && !cancelled.isCompleted) {
+            cancelled.complete();
+          }
           try {
             final out = await host.runAgentTask(
               agent,
@@ -284,7 +346,10 @@ class HostMcpServer {
   }
 
   Future<void> _handle(HttpRequest request) async {
-    if (forward != null) { await forward!(request); return; }
+    if (forward != null) {
+      await forward!(request);
+      return;
+    }
     HttpClient? client;
     try {
       if (_stopping || request.uri.path != '/mcp') {
@@ -298,11 +363,25 @@ class HostMcpServer {
         return;
       }
       final identity = identify?.call(request) ?? 'default';
+      // Rebuild only this PC's backend when the shared tool catalogue changes.
+      // A legacy stateful client must reinitialize after catalogue replacement.
+      final fingerprint = jsonEncode([
+        for (final tool in _currentExtraTools)
+          [tool.name, tool.description, tool.inputSchema],
+      ]);
+      if (_toolFingerprints[identity] != fingerprint) {
+        _toolFingerprints[identity] = fingerprint;
+        final previous = _clients.remove(identity);
+        if (previous != null) await (await previous).stop();
+      }
       final server = await _clients.putIfAbsent(identity, () async {
         final server = StreamableMcpServer(
           serverFactory: (_) => _build(identity),
-          host: '127.0.0.1', port: 0, path: '/mcp',
-          authenticator: (req) => authorize(req as HttpRequest) &&
+          host: '127.0.0.1',
+          port: 0,
+          path: '/mcp',
+          authenticator: (req) =>
+              authorize(req as HttpRequest) &&
               (identify?.call(req) ?? 'default') == identity,
           enableDnsRebindingProtection: false,
         );
@@ -312,14 +391,33 @@ class HostMcpServer {
       if (_stopping) throw StateError('MCP is stopping');
       client = HttpClient()..autoUncompress = false;
       _connections.add(client);
-      final upstream = await client.openUrl(request.method,
-          Uri(scheme: 'http', host: '127.0.0.1', port: server.boundPort, path: '/mcp',
-              query: request.uri.query.isEmpty ? null : request.uri.query));
+      final upstream = await client.openUrl(
+        request.method,
+        Uri(
+          scheme: 'http',
+          host: '127.0.0.1',
+          port: server.boundPort,
+          path: '/mcp',
+          query: request.uri.query.isEmpty ? null : request.uri.query,
+        ),
+      );
       upstream.followRedirects = false;
-      const hopHeaders = {'host', 'content-length', 'transfer-encoding', 'connection',
-          'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'upgrade'};
+      const hopHeaders = {
+        'host',
+        'content-length',
+        'transfer-encoding',
+        'connection',
+        'keep-alive',
+        'proxy-authenticate',
+        'proxy-authorization',
+        'te',
+        'trailer',
+        'upgrade',
+      };
       request.headers.forEach((name, values) {
-        if (!hopHeaders.contains(name.toLowerCase())) upstream.headers.set(name, values);
+        if (!hopHeaders.contains(name.toLowerCase())) {
+          upstream.headers.set(name, values);
+        }
       });
       var size = 0;
       await for (final bytes in request) {
@@ -335,11 +433,17 @@ class HostMcpServer {
       final response = await upstream.close();
       request.response.statusCode = response.statusCode;
       response.headers.forEach((name, values) {
-        if (!hopHeaders.contains(name.toLowerCase())) request.response.headers.set(name, values);
+        if (!hopHeaders.contains(name.toLowerCase())) {
+          request.response.headers.set(name, values);
+        }
       });
       request.response.bufferOutput = false;
       final activeClient = client;
-      unawaited(request.response.done.catchError((_) { activeClient.close(force: true); }));
+      unawaited(
+        request.response.done.catchError((_) {
+          activeClient.close(force: true);
+        }),
+      );
       await request.response.addStream(response);
       await request.response.close();
     } catch (_) {
@@ -357,10 +461,15 @@ class HostMcpServer {
     _stopping = true;
     await _server?.close(force: true);
     _server = null;
-    for (final client in _connections.toList()) { client.close(force: true); }
+    for (final client in _connections.toList()) {
+      client.close(force: true);
+    }
     for (final pending in _clients.values.toList()) {
-      try { await (await pending).stop(); } catch (_) {}
+      try {
+        await (await pending).stop();
+      } catch (_) {}
     }
     _clients.clear();
+    _toolFingerprints.clear();
   }
 }
