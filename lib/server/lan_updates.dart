@@ -16,22 +16,29 @@ class LanUpdateManifest {
     required this.publishedAt,
     required this.bytes,
     required this.sha256Hex,
+    this.assetId,
   });
   final String release;
   final DateTime publishedAt;
   final int bytes;
   final String sha256Hex;
+
+  /// GitHub asset IDs change on rolling releases; tag latest does not.
+  final int? assetId;
+  String get fingerprint => '${assetId ?? 'legacy'}:$sha256Hex';
   Map<String, dynamic> toJson() => {
     'release': release,
     'publishedAt': publishedAt.toUtc().toIso8601String(),
     'filename': windowsUpdateFilename,
     'bytes': bytes,
     'sha256': sha256Hex,
+    if (assetId != null) 'assetId': assetId,
   };
   factory LanUpdateManifest.fromJson(Map<String, dynamic> value) {
     final bytes = value['bytes'];
     final digest = value['sha256'];
     final release = value['release'];
+    final assetId = value['assetId'];
     if (value['filename'] != windowsUpdateFilename ||
         bytes is! int ||
         bytes <= 0 ||
@@ -40,7 +47,8 @@ class LanUpdateManifest {
         !RegExp(r'^[a-f0-9]{64}$').hasMatch(digest) ||
         release is! String ||
         release.isEmpty ||
-        release.length > 200) {
+        release.length > 200 ||
+        (assetId != null && (assetId is! int || assetId <= 0))) {
       throw const FormatException('Invalid Windows update manifest');
     }
     return LanUpdateManifest(
@@ -48,6 +56,7 @@ class LanUpdateManifest {
       publishedAt: DateTime.parse(value['publishedAt'] as String).toUtc(),
       bytes: bytes,
       sha256Hex: digest,
+      assetId: assetId as int?,
     );
   }
 }
@@ -64,6 +73,9 @@ class LanUpdateCache {
   Future<LanUpdateManifest>? _refreshing;
   Future<void> _gate = Future<void>.value();
   final _snapshots = <LanUpdateSnapshot>{};
+  bool _closed = false;
+  final _abort = Completer<void>();
+  int get activeDownloads => _snapshots.length;
   Future<T> _locked<T>(Future<T> Function() action) async {
     final previous = _gate;
     final done = Completer<void>();
@@ -79,6 +91,7 @@ class LanUpdateCache {
   /// Opens metadata and a file handle together. Refresh waits until active
   /// downloads close, so Windows never replaces a ZIP that is still in use.
   Future<LanUpdateSnapshot> openSnapshot() => _locked(() async {
+    if (_closed) throw StateError('Update cache is closed');
     final info = _manifest;
     if (info == null) {
       throw StateError('No Windows update is cached');
@@ -95,10 +108,14 @@ class LanUpdateCache {
   });
   LanUpdateManifest? _manifest;
   LanUpdateManifest? get manifest => _manifest;
+
+  /// Safe to advertise on authenticated /access after checking Updates access.
+  Map<String, dynamic>? get advertisement => _manifest?.toJson();
   File get archive => File('${directory.path}/$windowsUpdateFilename');
   File get _manifestFile => File('${directory.path}/manifest.json');
 
   Future<void> load() async {
+    if (_closed) throw StateError('Update cache is closed');
     _manifest = null;
     try {
       final info = LanUpdateManifest.fromJson(
@@ -113,8 +130,11 @@ class LanUpdateCache {
     }
   }
 
-  Future<LanUpdateManifest> refresh() =>
-      _refreshing ??= _refresh().whenComplete(() => _refreshing = null);
+  Future<LanUpdateManifest> refresh() {
+    if (_closed) throw StateError('Update cache is closed');
+    return _refreshing ??= _refresh().whenComplete(() => _refreshing = null);
+  }
+
   Future<LanUpdateManifest> _refresh() async {
     final metadata = await _smallJson(
       _client,
@@ -126,6 +146,7 @@ class LanUpdateCache {
         'Accept': 'application/vnd.github+json',
         'User-Agent': 'Robokks-ai-chatbot',
       },
+      abortTrigger: _abort.future,
     );
     final assets = metadata['assets'];
     if (assets is! List) {
@@ -139,9 +160,23 @@ class LanUpdateCache {
       throw const FormatException('Release has no unique Windows archive');
     }
     final asset = candidates.single;
+    final assetId = asset['id'];
+    if (assetId is! int || assetId <= 0) {
+      throw const FormatException('Invalid official release asset identity');
+    }
     final bytes = asset['size'];
     if (bytes is! int || bytes <= 0 || bytes > maxWindowsUpdateBytes) {
       throw const FormatException('Windows update is too large or empty');
+    }
+    final existing = _manifest;
+    final declaredDigest = asset['digest'];
+    if (existing != null &&
+        existing.assetId == assetId &&
+        existing.bytes == bytes &&
+        (declaredDigest == null ||
+            declaredDigest == 'sha256:${existing.sha256Hex}') &&
+        await archive.exists()) {
+      return existing;
     }
     final uri = Uri.parse(asset['browser_download_url'] as String);
     if (uri.scheme != 'https' ||
@@ -162,7 +197,13 @@ class LanUpdateCache {
     await directory.create(recursive: true);
     final part = File('${archive.path}.partial');
     try {
-      await _download(_client, uri, part, expectedBytes: bytes);
+      await _download(
+        _client,
+        uri,
+        part,
+        expectedBytes: bytes,
+        abortTrigger: _abort.future,
+      );
       final hash = await _digest(part);
       final declaredHash = asset['digest'];
       if (declaredHash is String &&
@@ -175,12 +216,15 @@ class LanUpdateCache {
         publishedAt: published,
         bytes: bytes,
         sha256Hex: hash,
+        assetId: assetId,
       );
       // Atomic replacement where supported. If interrupted before the metadata
       // is replaced, load() detects a mismatch and refuses to serve the archive.
       await _locked(() async {
         await Future.wait(_snapshots.map((snapshot) => snapshot.done));
+        if (_closed) throw StateError('Update cache is closed');
         await part.rename(archive.path);
+        _manifest = null;
         final manifestPart = File('${_manifestFile.path}.partial');
         await manifestPart.writeAsString(
           jsonEncode(info.toJson()),
@@ -196,6 +240,12 @@ class LanUpdateCache {
   }
 
   void close() {
+    if (_closed) return;
+    _closed = true;
+    _abort.complete();
+    for (final snapshot in _snapshots.toList()) {
+      unawaited(snapshot.close().catchError((_) {}));
+    }
     if (_ownsClient) _client.close();
   }
 }
@@ -248,8 +298,13 @@ class LanUpdateClient {
     required this.baseUrl,
     required this.keyProvider,
     http.Client? client,
+    this.requestTimeout = const Duration(seconds: 30),
+    this.idleTimeout = const Duration(seconds: 60),
   }) : _client = client ?? http.Client(),
        _ownsClient = client == null {
+    if (requestTimeout <= Duration.zero || idleTimeout <= Duration.zero) {
+      throw ArgumentError('Update timeouts must be positive');
+    }
     final uri = Uri.parse(baseUrl);
     if (!{'http', 'https'}.contains(uri.scheme) ||
         uri.host.isEmpty ||
@@ -261,11 +316,16 @@ class LanUpdateClient {
   }
   final String baseUrl;
   final Future<String?> Function() keyProvider;
+  final Duration requestTimeout;
+  final Duration idleTimeout;
   final http.Client _client;
   final bool _ownsClient;
   bool _downloading = false;
+  final _abort = Completer<void>();
+  bool _closed = false;
   Uri _url(String path) => Uri.parse(baseUrl).replace(path: path);
   Future<Map<String, String>> _headers() async {
+    if (_closed) throw StateError('Update connection is closed');
     final key = await keyProvider();
     if (key == null ||
         key.isEmpty ||
@@ -283,6 +343,8 @@ class LanUpdateClient {
       _client,
       _url('/updates/windows/manifest'),
       headers: await _headers(),
+      abortTrigger: _abort.future,
+      requestTimeout: requestTimeout,
     ),
   );
 
@@ -315,6 +377,9 @@ class LanUpdateClient {
         expectedBytes: manifest.bytes,
         headers: await _headers(),
         followRedirects: false,
+        abortTrigger: _abort.future,
+        requestTimeout: requestTimeout,
+        idleTimeout: idleTimeout,
       );
       if (await _digest(part) != manifest.sha256Hex) {
         throw const FormatException(
@@ -329,39 +394,69 @@ class LanUpdateClient {
   }
 
   void close() {
+    if (_closed) return;
+    _closed = true;
+    _abort.complete();
     if (_ownsClient) _client.close();
   }
 }
 
+/// Store successful downloads per upstream, never pretend they were installed.
+String updateDownloadSettingKey(String upstream) =>
+    'lab.updates.downloaded.${sha256.convert(utf8.encode(Uri.parse(upstream).origin))}';
+
 Future<String> _digest(File file) async =>
     (await sha256.bind(file.openRead()).first).toString();
+
+class _UpdateRequestAbort {
+  _UpdateRequestAbort(Future<void>? owner, Duration maximum) {
+    _timer = Timer(maximum, abort);
+    owner?.then((_) => abort());
+  }
+  final _cancel = Completer<void>();
+  late final Timer _timer;
+  Future<void> get trigger => _cancel.future;
+  void abort() {
+    if (!_cancel.isCompleted) _cancel.complete();
+  }
+
+  void dispose() {
+    _timer.cancel();
+    abort();
+  }
+}
 
 Future<Map<String, dynamic>> _smallJson(
   http.Client client,
   Uri url, {
   Map<String, String> headers = const {},
+  Future<void>? abortTrigger,
+  Duration requestTimeout = const Duration(seconds: 30),
 }) async {
-  final response = await client
-      .send(
-        http.Request('GET', url)
-          ..headers.addAll(headers)
-          ..followRedirects = false,
-      )
-      .timeout(const Duration(seconds: 30));
-  if (response.statusCode != 200) {
-    await response.stream.listen(null).cancel();
-    throw HttpException('Update service returned ${response.statusCode}');
-  }
-  final bytes = <int>[];
-  await for (final chunk in response.stream.timeout(
-    const Duration(seconds: 30),
-  )) {
-    if (bytes.length + chunk.length > 512 * 1024) {
-      throw const FormatException('Update metadata is too large');
+  final abort = _UpdateRequestAbort(abortTrigger, requestTimeout);
+  try {
+    final response = await client
+        .send(
+          http.AbortableRequest('GET', url, abortTrigger: abort.trigger)
+            ..headers.addAll(headers)
+            ..followRedirects = false,
+        )
+        .timeout(requestTimeout);
+    if (response.statusCode != 200) {
+      await response.stream.listen(null).cancel();
+      throw HttpException('Update service returned ${response.statusCode}');
     }
-    bytes.addAll(chunk);
+    final bytes = <int>[];
+    await for (final chunk in response.stream.timeout(requestTimeout)) {
+      if (bytes.length + chunk.length > 512 * 1024) {
+        throw const FormatException('Update metadata is too large');
+      }
+      bytes.addAll(chunk);
+    }
+    return jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+  } finally {
+    abort.dispose();
   }
-  return jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
 }
 
 Future<void> _download(
@@ -371,47 +466,63 @@ Future<void> _download(
   required int expectedBytes,
   Map<String, String> headers = const {},
   bool followRedirects = true,
+  Future<void>? abortTrigger,
+  Duration requestTimeout = const Duration(seconds: 30),
+  Duration idleTimeout = const Duration(seconds: 60),
 }) async {
-  final response = await client
-      .send(
-        http.Request('GET', url)
-          ..headers.addAll(headers)
-          ..followRedirects = followRedirects
-          ..maxRedirects = 5,
-      )
-      .timeout(const Duration(seconds: 30));
-  if (response.statusCode != 200) {
-    await response.stream.listen(null).cancel();
-    throw HttpException('Update download returned ${response.statusCode}');
-  }
-  if (response.contentLength != null &&
-      response.contentLength != expectedBytes) {
-    await response.stream.listen(null).cancel();
-    throw const FormatException(
-      'Update size changed. Refresh the update information.',
-    );
-  }
-  final sink = output.openWrite();
-  var bytes = 0;
-  final elapsed = Stopwatch()..start();
+  final abort = _UpdateRequestAbort(abortTrigger, const Duration(minutes: 15));
   try {
-    await for (final chunk in response.stream.timeout(
-      const Duration(seconds: 60),
-    )) {
-      if (elapsed.elapsed > const Duration(minutes: 15)) {
-        throw const HttpException('Update download took too long');
-      }
-      bytes += chunk.length;
-      if (bytes > expectedBytes || bytes > maxWindowsUpdateBytes) {
-        throw const FormatException('Update exceeded its declared size');
-      }
-      sink.add(chunk);
+    final response = await client
+        .send(
+          http.AbortableRequest('GET', url, abortTrigger: abort.trigger)
+            ..headers.addAll(headers)
+            ..followRedirects = followRedirects
+            ..maxRedirects = 5,
+        )
+        .timeout(requestTimeout);
+    if (response.statusCode != 200) {
+      await response.stream.listen(null).cancel();
+      throw HttpException('Update download returned ${response.statusCode}');
     }
-    await sink.flush();
-    if (bytes != expectedBytes) {
-      throw const FormatException('Update download was incomplete');
+    if (response.contentLength != null &&
+        response.contentLength != expectedBytes) {
+      await response.stream.listen(null).cancel();
+      throw const FormatException(
+        'Update size changed. Refresh the update information.',
+      );
+    }
+    final sink = output.openWrite();
+    var bytes = 0;
+    var failed = false;
+    try {
+      await sink.addStream(
+        response.stream.timeout(idleTimeout).map((chunk) {
+          bytes += chunk.length;
+          if (bytes > expectedBytes || bytes > maxWindowsUpdateBytes) {
+            throw const FormatException('Update exceeded its declared size');
+          }
+          return chunk;
+        }),
+      );
+      await sink.flush();
+      if (bytes != expectedBytes) {
+        throw const FormatException('Update download was incomplete');
+      }
+    } catch (_) {
+      failed = true;
+      rethrow;
+    } finally {
+      if (failed) {
+        // addStream may already have closed the file on a source error. Keep
+        // the original timeout/cancellation error while still releasing it.
+        try {
+          await sink.close();
+        } catch (_) {}
+      } else {
+        await sink.close();
+      }
     }
   } finally {
-    await sink.close();
+    abort.dispose();
   }
 }

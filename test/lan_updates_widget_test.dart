@@ -5,6 +5,8 @@ import 'package:ai_chatbot/features/lab/updates_screen.dart';
 import 'package:ai_chatbot/features/lab/app_updates_screen.dart';
 import 'package:ai_chatbot/core/storage.dart';
 import 'package:ai_chatbot/data/lab_role.dart';
+import 'package:ai_chatbot/data/models.dart';
+import 'package:ai_chatbot/features/lab/client_update_banner.dart';
 import 'package:ai_chatbot/data/local/local_models.dart';
 import 'package:ai_chatbot/state/app_state.dart';
 import 'package:hive_ce/hive_ce.dart';
@@ -15,6 +17,76 @@ import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
 
 void main() {
+  testWidgets(
+    'Main release banner compares actual asset identity with last download',
+    (tester) async {
+      late Directory dir;
+      late AppState app;
+      await tester.runAsync(() async {
+        dir = await Directory.systemTemp.createTemp('update-banner');
+        final storage = await Storage.openAt(dir.path);
+        app = AppState(
+          storage,
+          localModels: LocalModelStore(
+            storage,
+            dir: Directory('${dir.path}/models')..createSync(),
+          ),
+        );
+        await app.load();
+        app.labRole = LabRole.client;
+        app.providers[ProviderKind.network] = ProviderSettings(
+          kind: ProviderKind.network,
+          baseUrl: 'http://main:8484/v1',
+        );
+        await app.setKey(ProviderKind.network, 'pc-test-key');
+      });
+      addTearDown(() async {
+        app.dispose();
+        await Hive.close();
+        await dir.delete(recursive: true);
+      });
+      final first = LanUpdateManifest(
+        release: 'latest',
+        publishedAt: DateTime.utc(2026),
+        bytes: 12,
+        sha256Hex: 'a' * 64,
+        assetId: 123,
+      );
+      Future<void> show(Map<String, dynamic>? data) async {
+        await tester.pumpWidget(
+          AppScope(
+            state: app,
+            child: MaterialApp(
+              home: Scaffold(body: ClientUpdateBanner(windowsUpdate: data)),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      await show(first.toJson());
+      expect(find.text('View update'), findsOneWidget);
+      expect(find.textContaining('installed'), findsNothing);
+      await tester.runAsync(
+        () => app.storage.setSetting(
+          updateDownloadSettingKey(
+            app.providers[ProviderKind.network]!.baseUrl,
+          ),
+          first.fingerprint,
+        ),
+      );
+      await show(first.toJson());
+      expect(find.text('View update'), findsNothing);
+      await show({...first.toJson(), 'assetId': 124});
+      expect(find.text('View update'), findsOneWidget);
+      await show({...first.toJson(), 'assetId': -1});
+      expect(find.text('View update'), findsNothing);
+      await show(null);
+      expect(find.text('View update'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('role wrapper asks an unpaired client to connect to Main', (
     tester,
   ) async {

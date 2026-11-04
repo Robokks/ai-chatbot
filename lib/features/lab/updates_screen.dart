@@ -13,11 +13,13 @@ class LanUpdatesScreen extends StatefulWidget {
     this.client,
     required this.destinationDirectory,
     this.onCacheChanged,
+    this.onDownloaded,
   }) : assert((cache == null) != (client == null));
   final LanUpdateCache? cache;
   final LanUpdateClient? client;
   final Directory destinationDirectory;
   final VoidCallback? onCacheChanged;
+  final Future<void> Function(LanUpdateManifest)? onDownloaded;
   @override
   State<LanUpdatesScreen> createState() => _LanUpdatesScreenState();
 }
@@ -68,9 +70,12 @@ class _LanUpdatesScreenState extends State<LanUpdatesScreen> {
     });
     try {
       final file = await widget.client!.downloadTo(
-        widget.destinationDirectory,
+        Directory(
+          '${widget.destinationDirectory.path}/release-${info.assetId ?? info.sha256Hex}',
+        ),
         info,
       );
+      await widget.onDownloaded?.call(info);
       if (mounted) {
         setState(
           () => _status =
@@ -80,7 +85,7 @@ class _LanUpdatesScreenState extends State<LanUpdatesScreen> {
     } on Object {
       if (mounted) {
         setState(
-          () => _status = 'Download failed or the checksum did not match. A different file already in the destination folder must be moved first.',
+          () => _status = 'Download failed or the checksum did not match. Refresh update information and try again. Existing files are preserved.',
         );
       }
     } finally {

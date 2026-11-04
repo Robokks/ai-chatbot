@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -11,12 +12,17 @@ void main() {
   late Directory dir;
   final payload = utf8.encode('test windows zip archive');
   String hash(List<int> bytes) => sha256.convert(bytes).toString();
-  Map<String, dynamic> release({String? url, int? size, String? digest}) => {
+  Map<String, dynamic> release({
+    String? url,
+    int? size,
+    String? digest,
+    int assetId = 123,
+  }) => {
     'tag_name': 'latest',
     'published_at': '2026-11-04T00:00:00Z',
     'assets': [
       {
-        'id': 123,
+        'id': assetId,
         'name': windowsUpdateFilename,
         'browser_download_url':
             url ??
@@ -73,7 +79,10 @@ void main() {
       directory: dir,
       client: MockClient((r) async {
         if (r.url.host == 'api.github.com') {
-          return http.Response(jsonEncode(release()), 200);
+          return http.Response(
+            jsonEncode(release(assetId: fail ? 124 : 123)),
+            200,
+          );
         }
         return http.Response.bytes(fail ? [1] : payload, 200);
       }),
@@ -211,6 +220,68 @@ void main() {
         );
         expect(await dir.list().toList(), isEmpty);
       }
+    },
+  );
+
+  test(
+    'idle timeout cancels the response stream and deletes partial ZIP',
+    () async {
+      final cancelled = Completer<void>();
+      late StreamController<List<int>> chunks;
+      chunks = StreamController<List<int>>(
+        onListen: () => chunks.add([1, 2]),
+        onCancel: () {
+          if (!cancelled.isCompleted) cancelled.complete();
+        },
+      );
+      final client = LanUpdateClient(
+        baseUrl: 'http://main:8484',
+        keyProvider: () async => 'pc-key',
+        idleTimeout: const Duration(milliseconds: 50),
+        client: MockClient.streaming(
+          (request, body) async => http.StreamedResponse(
+            chunks.stream,
+            200,
+            contentLength: payload.length,
+          ),
+        ),
+      );
+      await expectLater(
+        client.downloadTo(dir, manifest()),
+        throwsA(isA<TimeoutException>()),
+      );
+      await cancelled.future.timeout(const Duration(seconds: 1));
+      expect(await dir.list().toList(), isEmpty);
+      client.close();
+      await chunks.close();
+    },
+  );
+
+  test(
+    'same official asset is advertised without re-downloading the ZIP',
+    () async {
+      var archives = 0;
+      final cache = LanUpdateCache(
+        directory: dir,
+        client: MockClient((r) async {
+          if (r.url.host == 'api.github.com') {
+            return http.Response(jsonEncode(release()), 200);
+          }
+          archives++;
+          return http.Response.bytes(payload, 200);
+        }),
+      );
+      final first = await cache.refresh();
+      expect(first.assetId, 123);
+      expect(cache.advertisement?['assetId'], 123);
+      expect((await cache.refresh()).fingerprint, first.fingerprint);
+      expect(archives, 1);
+      final snapshot = await cache.openSnapshot();
+      expect(cache.activeDownloads, 1);
+      cache.close();
+      await snapshot.done;
+      expect(cache.activeDownloads, 0);
+      expect(() => cache.refresh(), throwsStateError);
     },
   );
 

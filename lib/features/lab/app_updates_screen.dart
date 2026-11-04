@@ -106,11 +106,21 @@ class _AppUpdatesScreenState extends State<AppUpdatesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final app = AppScope.of(context);
+    final downloadedSetting = _client == null
+        ? null
+        : updateDownloadSettingKey(_client!.baseUrl);
     if (_destination != null && (_cache != null || _client != null)) {
       return LanUpdatesScreen(
         cache: _cache,
         client: _client,
         destinationDirectory: _destination!,
+        onDownloaded: downloadedSetting == null
+            ? null
+            : (manifest) => app.storage.setSetting(
+                downloadedSetting,
+                manifest.fingerprint,
+              ),
       );
     }
     return Scaffold(
