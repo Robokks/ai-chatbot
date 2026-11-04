@@ -48,8 +48,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _jumpToBottom() {
     if (_scroll.hasClients) {
-      _scroll.animateTo(0,
-          duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
+      _scroll.animateTo(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+      );
     }
   }
 
@@ -71,7 +74,9 @@ class _ChatScreenState extends State<ChatScreen> {
               : _messages(state, c),
         ),
         if (state.pendingApproval != null)
-          _ComposerDock(child: ToolApprovalCard(request: state.pendingApproval!)),
+          _ComposerDock(
+            child: ToolApprovalCard(request: state.pendingApproval!),
+          ),
         if (c != null && c.messages.isNotEmpty)
           _ComposerDock(child: Composer(key: _composerKey)),
       ],
@@ -84,9 +89,9 @@ class _ChatScreenState extends State<ChatScreen> {
         onDragDone: (d) {
           setState(() => _dragging = false);
           final service = AttachmentService();
-          _composerKey.currentState?.addFiles(() async => [
-                for (final f in d.files) await service.fromXFile(f),
-              ]);
+          _composerKey.currentState?.addFiles(
+            () async => [for (final f in d.files) await service.fromXFile(f)],
+          );
         },
         child: Stack(children: [body, if (_dragging) const _DropOverlay()]),
       );
@@ -158,8 +163,25 @@ class _TopBar extends StatelessWidget {
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
               ),
+            ),
+            IconButton(
+              tooltip: 'System prompt',
+              icon: const Icon(Icons.tune_outlined),
+              onPressed: state.isStreaming
+                  ? null
+                  : () async {
+                      final value = await showDialog<String>(
+                        context: context,
+                        builder: (_) =>
+                            _SystemPromptEditor(initial: state.systemPrompt),
+                      );
+                      if (value != null) await state.setSystemPrompt(value);
+                    },
             ),
             IconButton(
               tooltip: 'New chat',
@@ -172,6 +194,49 @@ class _TopBar extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SystemPromptEditor extends StatefulWidget {
+  const _SystemPromptEditor({required this.initial});
+  final String initial;
+  @override
+  State<_SystemPromptEditor> createState() => _SystemPromptEditorState();
+}
+
+class _SystemPromptEditorState extends State<_SystemPromptEditor> {
+  late final _controller = TextEditingController(text: widget.initial);
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('System prompt'),
+    content: SizedBox(
+      width: 560,
+      child: TextField(
+        controller: _controller,
+        minLines: 4,
+        maxLines: 12,
+        autofocus: true,
+        decoration: const InputDecoration(
+          hintText: 'Instructions for the AI in your chats',
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, _controller.text),
+        child: const Text('Save'),
+      ),
+    ],
+  );
 }
 
 class _ComposerDock extends StatelessWidget {
@@ -202,10 +267,26 @@ class _Welcome extends StatelessWidget {
   final GlobalKey<ComposerState> composerKey;
 
   static const _suggestions = [
-    (Icons.edit_note_rounded, 'Write', 'Help me write a polite follow-up email'),
-    (Icons.school_outlined, 'Learn', 'Explain how transformers work in simple terms'),
-    (Icons.code_rounded, 'Code', 'Write a Python script that renames files by date'),
-    (Icons.lightbulb_outline_rounded, 'Brainstorm', 'Give me 10 weekend project ideas'),
+    (
+      Icons.edit_note_rounded,
+      'Write',
+      'Help me write a polite follow-up email',
+    ),
+    (
+      Icons.school_outlined,
+      'Learn',
+      'Explain how transformers work in simple terms',
+    ),
+    (
+      Icons.code_rounded,
+      'Code',
+      'Write a Python script that renames files by date',
+    ),
+    (
+      Icons.lightbulb_outline_rounded,
+      'Brainstorm',
+      'Give me 10 weekend project ideas',
+    ),
   ];
 
   String _greeting() {
@@ -250,13 +331,13 @@ class _Welcome extends StatelessWidget {
     );
 
     Widget chip((IconData, String, String) s) => ActionChip(
-          avatar: Icon(s.$1, size: 18, color: p.textMuted),
-          label: Text(s.$2),
-          onPressed: () => composerKey.currentState?.setText(s.$3),
-          backgroundColor: p.background,
-          side: BorderSide(color: p.border),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        );
+      avatar: Icon(s.$1, size: 18, color: p.textMuted),
+      label: Text(s.$2),
+      onPressed: () => composerKey.currentState?.setText(s.$3),
+      backgroundColor: p.background,
+      side: BorderSide(color: p.border),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    );
 
     final composer = Composer(
       key: composerKey,
@@ -275,7 +356,8 @@ class _Welcome extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
-                      minHeight: MediaQuery.sizeOf(context).height * 0.45),
+                    minHeight: MediaQuery.sizeOf(context).height * 0.45,
+                  ),
                   child: Center(child: greeting),
                 ),
               ),
@@ -358,8 +440,10 @@ class _KeyBanner extends StatelessWidget {
           Icon(Icons.key_rounded, size: 20, color: p.textMuted),
           const SizedBox(width: 10),
           Expanded(
-            child: Text('Add your ${provider.label} API key to start chatting.',
-                style: const TextStyle(fontSize: 14)),
+            child: Text(
+              'Add your ${provider.label} API key to start chatting.',
+              style: const TextStyle(fontSize: 14),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pushNamed('/settings'),
@@ -411,8 +495,10 @@ class _DropOverlay extends StatelessWidget {
             border: Border.all(color: accent, width: 2),
           ),
           alignment: Alignment.center,
-          child: Text('Drop files to attach',
-              style: serif(context, size: 24).copyWith(color: accent)),
+          child: Text(
+            'Drop files to attach',
+            style: serif(context, size: 24).copyWith(color: accent),
+          ),
         ),
       ),
     );

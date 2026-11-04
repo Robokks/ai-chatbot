@@ -53,6 +53,43 @@ void main() {
     await dir.delete(recursive: true);
   });
 
+  test('chat web switch persists and controls offered tools without changing sharing', () async {
+    await state.setKey(ProviderKind.anthropic, 'test');
+    await state.send('Offline turn', []);
+    expect(fake.last!.tools.map((t) => t.name), isNot(contains('phone_web_search')));
+    expect(fake.last!.tools.map((t) => t.name), contains('phone_calculator'));
+    expect(state.tools.disabledBuiltins, isNot(contains('web_search')));
+    await state.setChatWebEnabled(true);
+    await state.send('Web turn', []);
+    expect(fake.last!.tools.map((t) => t.name), containsAll(['phone_web_search', 'phone_read_web_page']));
+    await state.load();
+    expect(state.chatWebEnabled, isTrue);
+    await state.setChatWebEnabled(false);
+    await state.send('Another offline turn', []);
+    expect(fake.last!.tools.map((t) => t.name), isNot(contains('phone_read_web_page')));
+  });
+
+  test('effective access immediately removes revoked models from the client picker', () async {
+    await state.updateProviderSettings(ProviderSettings(kind: ProviderKind.network, models: ['openai/old']));
+    await state.selectModel(ProviderKind.network, 'openai/old');
+    state.applyHostAccess({'models': ['openai/allowed'], 'access': {'tools': <String>[]}});
+    expect(state.providers[ProviderKind.network]!.models, ['openai/allowed']);
+    expect(state.model, 'openai/allowed');
+    state.applyHostAccess({'models': <String>[], 'access': {'blocked': true, 'tools': <String>[]}});
+    expect(state.providers[ProviderKind.network]!.models, isEmpty);
+    expect(state.model, isEmpty);
+  });
+
+  test('Main web tool names authorize the matching client built-ins only', () async {
+    await state.setKey(ProviderKind.network, 'test-main');
+    await state.updateProviderSettings(ProviderSettings(kind: ProviderKind.network, models: ['openai/test']));
+    await state.setLabRole(LabRole.client);
+    await state.setChatWebEnabled(true);
+    state.applyHostAccess({'models': ['openai/test'], 'access': {'tools': ['web_search']}});
+    await state.send('Search', []);
+    expect(fake.last!.tools.map((t) => t.name), ['phone_web_search']);
+  });
+
   test('without a key, shows a helpful error', () async {
     await state.send('Hi', []);
     final reply = state.current!.messages.last;

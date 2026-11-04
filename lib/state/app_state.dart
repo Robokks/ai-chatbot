@@ -19,6 +19,7 @@ import '../tools/tool_registry.dart';
 import '../tools/tool_source.dart';
 import '../tools/mcp_source.dart';
 import '../server/client_connection.dart';
+import '../server/client_access.dart' show canonicalToolName;
 
 const demoMode = bool.fromEnvironment('DEMO');
 
@@ -73,6 +74,7 @@ class AppState extends ChangeNotifier {
   AppThemeStyle themeStyle = AppThemeStyle.cream;
   LabRole? labRole;
   String systemPrompt = '';
+  bool chatWebEnabled = false;
   ProviderKind provider = ProviderKind.anthropic;
   String model = ProviderKind.anthropic.models.first;
 
@@ -101,6 +103,7 @@ class AppState extends ChangeNotifier {
         AppThemeStyle.cream;
     labRole = LabRole.values.asNameMap()[storage.getSetting('lab.role')];
     systemPrompt = storage.getSetting('systemPrompt') ?? '';
+    chatWebEnabled = storage.getSetting('chat.webEnabled') == 'true';
     provider = ProviderKind.values.asNameMap()[storage.getSetting('provider')] ??
         ProviderKind.anthropic;
     model = storage.getSetting('model') ?? providers[provider]!.models.firstOrNull ?? '';
@@ -217,12 +220,27 @@ class AppState extends ChangeNotifier {
 
   Set<String>? hostAllowedTools;
   void applyHostAccess(Map<String, dynamic> snapshot) {
+    var changed = false;
+    final models = snapshot['models'];
+    final settings = providers[ProviderKind.network];
+    if (models is List && settings != null) {
+      final allowed = models.whereType<String>().toList();
+      if (!listEquals(settings.models, allowed)) {
+        settings.models = allowed;
+        if (provider == ProviderKind.network && !allowed.contains(model)) {
+          model = allowed.firstOrNull ?? '';
+        }
+        unawaited(storage.saveProviderSettings(settings).catchError((Object _) {}));
+        changed = true;
+      }
+    }
     if (labRole == LabRole.relay && snapshot['serverTime'] is int) {
       host.server.relay?.clockOffset = Duration(milliseconds: (snapshot['serverTime'] as int) - DateTime.now().toUtc().millisecondsSinceEpoch);
     }
     final raw = (snapshot['access'] as Map?)?['tools'] as List?;
-    final names = raw?.cast<String>().toSet();
-    if (!setEquals(names, hostAllowedTools)) { hostAllowedTools = names; notifyListeners(); }
+    final names = raw?.cast<String>().map(canonicalToolName).toSet();
+    if (!setEquals(names, hostAllowedTools)) { hostAllowedTools = names; changed = true; }
+    if (changed) notifyListeners();
   }
 
   /// Refreshes the shared model list from the paired host.
@@ -271,6 +289,12 @@ class AppState extends ChangeNotifier {
   Future<void> setThemeStyle(AppThemeStyle style) async {
     themeStyle = style;
     await storage.setSetting('themeStyle', style.name);
+    notifyListeners();
+  }
+
+  Future<void> setChatWebEnabled(bool enabled) async {
+    chatWebEnabled = enabled;
+    await storage.setSetting('chat.webEnabled', '$enabled');
     notifyListeners();
   }
 
@@ -397,7 +421,8 @@ class AppState extends ChangeNotifier {
       }
 
       final offered = demoMode ? const <ToolSpec>[] : tools.activeTools().where((tool) =>
-          (labRole != LabRole.client && labRole != LabRole.relay) || hostAllowedTools == null || hostAllowedTools!.contains(tool.name)).toList();
+          (chatWebEnabled || (tool.sourceId != ToolRegistry.builtinId || !{'phone_web_search', 'phone_read_web_page'}.contains(tool.name))) &&
+          ((labRole != LabRole.client && labRole != LabRole.relay) || hostAllowedTools == null || hostAllowedTools!.contains(canonicalToolName(tool.name)))).toList();
       await _stream(reply, history, offered);
       if (_stopped || reply.toolCalls.isEmpty) return _finish(c);
       if (round + 1 >= maxToolRounds) {
@@ -481,6 +506,7 @@ class AppState extends ChangeNotifier {
               if (d.providerBlocks != null) {
                 reply.providerBlocks = d.providerBlocks;
               }
+              if (d.providerKind != null) reply.provider = d.providerKind;
               if (d.routingInfo != null) reply.routingInfo = d.routingInfo;
               if (d.notice != null) reply.error = d.notice;
               notifyListeners();

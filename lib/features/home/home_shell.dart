@@ -13,6 +13,8 @@ import '../lab/logs_screen.dart';
 import '../lab/analytics_screen.dart';
 import '../lab/models_screen.dart';
 import '../lab/client_status_bar.dart';
+import '../lab/sources_screen.dart';
+import '../lab/agents_screen.dart';
 
 /// Conversation drawer on phones, app menu and chat history on wide screens.
 class HomeShell extends StatefulWidget {
@@ -34,6 +36,8 @@ class _HomeShellState extends State<HomeShell> {
     'Logs',
     'Settings',
     'Analytics',
+    'Sources',
+    'Agents',
   ];
   static const _icons = [
     Icons.chat_bubble_outline,
@@ -43,6 +47,8 @@ class _HomeShellState extends State<HomeShell> {
     Icons.article_outlined,
     Icons.settings_outlined,
     Icons.analytics_outlined,
+    Icons.dns_outlined,
+    Icons.terminal_outlined,
   ];
 
   static const _wideBreakpoint = 900.0;
@@ -55,7 +61,8 @@ class _HomeShellState extends State<HomeShell> {
     final pages =
         (state.labRole == LabRole.client || state.labRole == LabRole.relay)
         ? [0, 3, 5]
-        : [0, 1, 2, 3, 6, 4, 5];
+        : [0, 1, 7, 2, 3, 8, 6, 4, 5];
+    if (!pages.contains(_selectedPage)) _selectedPage = 0;
 
     final Widget content;
     if (wide) {
@@ -68,31 +75,37 @@ class _HomeShellState extends State<HomeShell> {
               child: SafeArea(
                 child: Column(
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        key: const ValueKey('desktop-menu'),
-                        children: [
-                          for (final i in pages)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 2),
-                              child: ListTile(
-                                leading: Icon(_icons[i]),
-                                title: Text(_pages[i]),
-                                selected: _selectedPage == i,
-                                selectedColor: Theme.of(context)
-                                    .colorScheme
-                                    .onPrimary,
-                                selectedTileColor: Theme.of(context)
-                                    .colorScheme
-                                    .primary,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
+                    Flexible(
+                      flex: 3,
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          key: const ValueKey('desktop-menu'),
+                          children: [
+                            for (final i in pages)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 2,
                                 ),
-                                onTap: () => setState(() => _selectedPage = i),
+                                child: ListTile(
+                                  leading: Icon(_icons[i]),
+                                  title: Text(_pages[i]),
+                                  selected: _selectedPage == i,
+                                  selectedColor: Theme.of(context)
+                                      .colorScheme
+                                      .onPrimary,
+                                  selectedTileColor: Theme.of(context)
+                                      .colorScheme
+                                      .primary,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  onTap: () =>
+                                      setState(() => _selectedPage = i),
+                                ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                     const Divider(),
@@ -120,6 +133,8 @@ class _HomeShellState extends State<HomeShell> {
               3 => const ToolsScreen(),
               4 => LogsScreen(analytics: state.host.analytics),
               6 => AnalyticsScreen(analytics: state.host.analytics),
+              7 => const SourcesScreen(),
+              8 => const AgentsScreen(),
               5 => const SettingsScreen(),
               _ => Scaffold(
                 appBar: AppBar(title: Text(_pages[_selectedPage])),

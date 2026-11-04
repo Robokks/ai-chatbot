@@ -74,7 +74,8 @@ class ComposerState extends State<Composer> {
   }
 
   bool get _canSend =>
-      !_processing && (_controller.text.trim().isNotEmpty || _attachments.isNotEmpty);
+      !_processing &&
+      (_controller.text.trim().isNotEmpty || _attachments.isNotEmpty);
 
   void _send() {
     final state = AppScope.read(context);
@@ -101,9 +102,22 @@ class ComposerState extends State<Composer> {
             // Tiles size to their content instead of filling the sheet.
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (hasCamera) _AttachOption(icon: Icons.photo_camera_outlined, label: 'Camera', value: 'camera'),
-              _AttachOption(icon: Icons.photo_library_outlined, label: 'Photos', value: 'photos'),
-              _AttachOption(icon: Icons.attach_file_rounded, label: 'Files', value: 'files'),
+              if (hasCamera)
+                _AttachOption(
+                  icon: Icons.photo_camera_outlined,
+                  label: 'Camera',
+                  value: 'camera',
+                ),
+              _AttachOption(
+                icon: Icons.photo_library_outlined,
+                label: 'Photos',
+                value: 'photos',
+              ),
+              _AttachOption(
+                icon: Icons.attach_file_rounded,
+                label: 'Files',
+                value: 'files',
+              ),
             ].map((w) => Expanded(child: w)).toList(),
           ),
         ),
@@ -175,7 +189,8 @@ class ComposerState extends State<Composer> {
                             child: AttachmentChip(
                               attachment: a,
                               warning: _warningFor(a, state.provider),
-                              onRemove: () => setState(() => _attachments.remove(a)),
+                              onRemove: () =>
+                                  setState(() => _attachments.remove(a)),
                             ),
                           ),
                         if (_processing)
@@ -216,12 +231,24 @@ class ComposerState extends State<Composer> {
                 onTap: _openAttachMenu,
                 bordered: true,
               ),
+              IconButton(
+                tooltip: state.chatWebEnabled
+                    ? 'Turn web search off'
+                    : 'Turn web search on',
+                isSelected: state.chatWebEnabled,
+                selectedIcon: const Icon(Icons.travel_explore),
+                icon: const Icon(Icons.public_outlined),
+                onPressed: streaming
+                    ? null
+                    : () => state.setChatWebEnabled(!state.chatWebEnabled),
+              ),
               const Spacer(),
               const ModelPill(),
               const SizedBox(width: 6),
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 150),
-                transitionBuilder: (c, a) => ScaleTransition(scale: a, child: c),
+                transitionBuilder: (c, a) =>
+                    ScaleTransition(scale: a, child: c),
                 child: streaming
                     ? _RoundIcon(
                         key: const ValueKey('stop'),
@@ -236,7 +263,9 @@ class ComposerState extends State<Composer> {
                         icon: Icons.arrow_upward_rounded,
                         tooltip: 'Send',
                         onTap: _canSend ? _send : null,
-                        filled: _canSend ? accent : accent.withValues(alpha: 0.35),
+                        filled: _canSend
+                            ? accent
+                            : accent.withValues(alpha: 0.35),
                         iconColor: Colors.white,
                       ),
               ),
@@ -249,7 +278,11 @@ class ComposerState extends State<Composer> {
 }
 
 class _AttachOption extends StatelessWidget {
-  const _AttachOption({required this.icon, required this.label, required this.value});
+  const _AttachOption({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   final IconData icon;
   final String label;
@@ -273,7 +306,10 @@ class _AttachOption extends StatelessWidget {
               children: [
                 Icon(icon, size: 26),
                 const SizedBox(height: 8),
-                Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
+                Text(
+                  label,
+                  style: const TextStyle(fontWeight: FontWeight.w500),
+                ),
               ],
             ),
           ),

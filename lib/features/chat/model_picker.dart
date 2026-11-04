@@ -114,7 +114,7 @@ class _ModelList extends StatelessWidget {
           for (final source in state.sources.all.where((s) => s.enabled)) ...[
             Padding(padding: const EdgeInsets.fromLTRB(8, 16, 8, 6), child: Text(source.name,
               style: const TextStyle(fontWeight: FontWeight.w600))),
-            for (final model in source.models)
+            for (final model in source.enabledModels)
               ListTile(title: Text(model), selected: state.provider == source.kind && state.model == source.route(model),
                 onTap: () { state.selectModel(source.kind, source.route(model)); Navigator.pop(context); }),
           ],
