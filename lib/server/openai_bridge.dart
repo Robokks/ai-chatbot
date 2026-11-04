@@ -225,6 +225,7 @@ class CompletionWriter {
   final List<ToolCall> toolCalls = [];
   List<Map<String, dynamic>>? providerBlocks;
   ProviderKind? provider;
+  String? routingInfo;
   String finishReason = 'stop';
   bool _sentRole = false;
 
@@ -240,6 +241,8 @@ class CompletionWriter {
 
   /// Records [d] and returns the chunk to stream, or null if nothing to send.
   Map<String, dynamic>? add(ChatDelta d) {
+    if (d.providerKind != null) provider = d.providerKind;
+    if (d.routingInfo != null) routingInfo = d.routingInfo;
     if (d.usage != null) usage.merge(d.usage!);
     if (d.notice != null && d.notice!.contains('length')) finishReason = 'length';
     if (d.providerBlocks != null) providerBlocks = d.providerBlocks;
@@ -278,9 +281,11 @@ class CompletionWriter {
   /// its signed thinking blocks back during a tool loop). Other OpenAI
   /// clients ignore the unknown fields.
   Map<String, dynamic> finalChunk() => _chunk({
-        if (providerBlocks != null) ...{
+        if (routingInfo != null) 'x_routing_info': routingInfo,
+        if (provider != null) 'x_provider': provider!.name,
+        if (providerBlocks != null || (provider != null && toolCalls.isNotEmpty)) ...{
           'x_provider': provider?.name,
-          'x_provider_blocks': providerBlocks,
+          'x_provider_blocks': providerBlocks ?? const <Map<String, dynamic>>[],
         },
       }, finish: finishReason);
 
@@ -311,6 +316,7 @@ class CompletionWriter {
             'index': 0,
             'message': {
               'role': 'assistant',
+              if (routingInfo != null) 'x_routing_info': routingInfo,
               'content': text.isEmpty && toolCalls.isNotEmpty ? null : text.toString(),
               if (reasoning.isNotEmpty) 'reasoning_content': reasoning.toString(),
               if (toolCalls.isNotEmpty)
@@ -322,9 +328,9 @@ class CompletionWriter {
                       'function': {'name': c.name, 'arguments': jsonEncode(c.arguments)},
                     },
                 ],
-              if (providerBlocks != null) ...{
+              if (providerBlocks != null || (provider != null && toolCalls.isNotEmpty)) ...{
                 'x_provider': provider?.name,
-                'x_provider_blocks': providerBlocks,
+                'x_provider_blocks': providerBlocks ?? const <Map<String, dynamic>>[],
               },
             },
             'finish_reason': finishReason,

@@ -47,6 +47,7 @@ class HostController extends ChangeNotifier
       this,
       onAnalytics: analytics.record,
       updateCache: () => updatesCache,
+      updateAdvertisement: () async => (await updatesCache).advertisement,
       extraTools: () => labview
           .sharedTools()
           .map(
@@ -234,7 +235,7 @@ class HostController extends ChangeNotifier
         ),
     for (final source in app.sources.all)
       if (source.enabled && source.shared)
-        for (final model in source.models)
+        for (final model in source.enabledModels)
           SharedModel(
             source.kind,
             source.route(model),

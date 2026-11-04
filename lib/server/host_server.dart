@@ -126,6 +126,7 @@ class HostServer extends ChangeNotifier {
     this.webEnabled,
     this.onAnalytics,
     this.updateCache,
+    this.updateAdvertisement,
     this.extraTools,
     this.runExtraTool,
     Random? random,
@@ -134,6 +135,7 @@ class HostServer extends ChangeNotifier {
   /// Coding agents shared over MCP (PC hosts only).
   final AgentHost? agents;
   final Future<LanUpdateCache> Function()? updateCache;
+  final Future<Map<String, dynamic>?> Function()? updateAdvertisement;
   final List<SourceTool> Function()? extraTools;
   final Future<ToolOutput> Function(
     String device,
@@ -482,6 +484,7 @@ class HostServer extends ChangeNotifier {
         snapshot = await cache.openSnapshot();
         _checkAccess(device, service: 'updates');
         req.response.contentLength = snapshot.manifest.bytes;
+        req.response.deadline = const Duration(minutes: 15);
         // addStream propagates socket backpressure to the bounded file reader.
         // A zero response deadline destroys the underlying connection, including
         // a socket paused by backpressure. close() alone cannot abort addStream.
@@ -576,10 +579,10 @@ class HostServer extends ChangeNotifier {
   }
 
   void _checkToolAccess(PairedDevice device, Iterable<String> tools) {
-    final requested = tools.toList();
+    final requested = tools.map(canonicalToolName).toList();
     for (final d in [device, ...device.via.map(_deviceById)]) {
       if (d.access.tools != null &&
-          requested.any((tool) => !d.access.tools!.contains(tool))) {
+          requested.any((tool) => !d.access.tools!.map(canonicalToolName).contains(tool))) {
         throw BridgeException(
           'This tool is not allowed by Main for this PC or its relays.',
           status: 403,
@@ -773,6 +776,133 @@ class HostServer extends ChangeNotifier {
     return reservation;
   }
 
+  /// Current permissions include every relay, while saved rules stay editable.
+  Map<String, dynamic> accessStatus(PairedDevice device) {
+    final hierarchy = [device];
+    var missingRelay = false;
+    for (final id in device.via) {
+      final parent = devices.where((d) => d.id == id).firstOrNull;
+      if (parent == null) {
+        missingRelay = true;
+      } else {
+        hierarchy.add(parent);
+      }
+    }
+    for (final d in hierarchy) {
+      d.usage.refresh();
+    }
+    Set<String>? intersect(Iterable<Set<String>?> sets) {
+      Set<String>? result;
+      for (final set in sets) {
+        if (set != null) {
+          result = result == null ? Set.of(set) : result.intersection(set);
+        }
+      }
+      return result;
+    }
+
+    int? minimum(Iterable<int?> values) {
+      final limits = values.whereType<int>().toList();
+      return limits.isEmpty ? null : limits.reduce(min);
+    }
+
+    final deadlines =
+        hierarchy.map((d) => d.access.expires).whereType<DateTime>().toList()
+          ..sort();
+    String? denial;
+    try {
+      _checkAccess(device);
+    } on BridgeException catch (e) {
+      denial = e.message;
+    }
+    final candidates = <String>{
+      'chat',
+      'mcp',
+      'a2a',
+      'claude_code',
+      'codex',
+      'relay',
+      'proxy',
+      'updates',
+      'labview',
+      'web_search',
+      'read_web_page',
+      for (final d in hierarchy) ...?d.access.services,
+    };
+    final services = <String>{};
+    if (denial == null) {
+      for (final service in candidates) {
+        try {
+          _checkAccess(device, service: service);
+          if (service == 'relay' &&
+              device.access.services?.contains('relay') != true) {
+            continue;
+          }
+          services.add(service);
+        } on BridgeException catch (_) {
+          /* Denied by an inherited rule. */
+        }
+      }
+    }
+    final models = denial == null
+        ? modelsFor(device).map((m) => m.id).toSet()
+        : <String>{};
+    final effective = ClientAccess(
+      approved: hierarchy.every((d) => d.access.approved),
+      blocked:
+          missingRelay ||
+          hierarchy.any((d) => d.access.blocked) ||
+          hierarchy
+              .skip(1)
+              .any((d) => d.access.services?.contains('relay') != true),
+      expires: deadlines.firstOrNull,
+      models: models,
+      services: services,
+      tools: denial == null
+          ? intersect(hierarchy.map((d) => d.access.tools?.map(canonicalToolName).toSet()))
+          : <String>{},
+      requestsPerDay: minimum(hierarchy.map((d) => d.access.requestsPerDay)),
+      tokensPerDay: minimum(hierarchy.map((d) => d.access.tokensPerDay)),
+    );
+    return {
+      'access': effective.toJson(),
+      'usage': device.usage.toJson(),
+      'remaining': {
+        'requests': minimum(
+          hierarchy.map(
+            (d) => d.access.requestsPerDay == null
+                ? null
+                : max(0, d.access.requestsPerDay! - d.usage.requests),
+          ),
+        ),
+        'tokens': minimum(
+          hierarchy.map(
+            (d) => d.access.tokensPerDay == null
+                ? null
+                : max(0, d.access.tokensPerDay! - d.usage.tokens),
+          ),
+        ),
+        'tokensReserved': hierarchy.any(
+          (d) => d.access.tokensPerDay != null && d.usage.hasActiveModelRequest,
+        ),
+      },
+      'denialReason': ?denial,
+      'stopped': stopAll || _closing,
+      'models': models.toList(),
+    };
+  }
+
+  Map<String, String> toolChoicesFor(PairedDevice device) => {
+    for (final name in device.access.tools ?? <String>{})
+      name: 'Saved tool permission',
+    ...device.clientTools,
+    for (final tool in webTools?.tools ?? <SourceTool>[])
+      if (tool.name == 'web_search' || tool.name == 'read_web_page')
+        tool.name: 'Main · ${tool.description}',
+    for (final tool in extraTools?.call() ?? <SourceTool>[])
+      tool.name: 'Main LabVIEW · ${tool.description}',
+  };
+
   /// IPv4 addresses other devices on the network can use.
   static Future<List<String>> localAddresses() async {
     final out = <String>[];
@@ -855,13 +985,11 @@ class HostServer extends ChangeNotifier {
                     'Unavailable relay',
               },
           ],
-          'access': device.access.toJson(),
-          'usage': device.usage.toJson(),
-          'stopped': stopAll,
+          ...accessStatus(device),
           'mcpPort': mcpPort,
           'proxyPort': packageProxyPort,
           'proxyHosts': defaultPackageHosts.toList(),
-          'models': device.access.models?.toList(),
+          'windowsUpdate': await _availableUpdate(device),
         });
       }
       if (req.method == 'POST' && path == '/access/tools') {
@@ -1161,19 +1289,23 @@ class HostServer extends ChangeNotifier {
   }
 
   Future<void> _relayRequest(HttpRequest req, PairedDevice outer) async {
-    _checkRelay(outer);
     final envelope = RelayEnvelope.fromJson(
       Map<String, dynamic>.from(
         jsonDecode(utf8.decode(await relayBytes(req))) as Map,
       ),
     );
     validateRelayPayload(envelope.payload);
+    final metadataOnly =
+        envelope.payload['kind'] == 'request' &&
+        envelope.payload['method'] == 'GET' &&
+        Uri.parse(envelope.payload['path'] as String).path == '/access';
+    if (!metadataOnly) _checkRelay(outer);
     if (envelope.hops.isEmpty || envelope.hops.last.id != outer.id) {
       throw BridgeException('Relay identity mismatch', status: 403);
     }
     envelope.verify((id) {
       final d = _deviceById(id);
-      _checkRelay(d);
+      if (!metadataOnly) _checkRelay(d);
       return RelayIdentity(d.id, d.key, d.via);
     }, _relayReplay);
     final payload = envelope.payload;
@@ -1270,6 +1402,28 @@ class HostServer extends ChangeNotifier {
     }
   }
 
+  Future<Map<String, dynamic>?> _availableUpdate(PairedDevice device) async {
+    try { _checkAccess(device, service: 'updates'); return await updateAdvertisement?.call().timeout(const Duration(seconds: 2)); }
+    catch (_) { return null; }
+  }
+
+  void _restoreReplay(PairedDevice device, BridgedRequest parsed, ProviderKind kind, String route) {
+    for (final message in parsed.messages.where((m) => m.role == Role.assistant && m.toolCalls.isNotEmpty)) {
+      final replay = _messageReplay[messageReplayKey(device.id, parsed.modelId, message)];
+      if (replay != null) { message.provider = replay.provider; message.providerBlocks = replay.blocks; }
+      else if (kind == ProviderKind.gemini || route.startsWith('auto:')) {
+        throw BridgeException('Tool context expired on Main. Start a new chat.', status: 409);
+      }
+    }
+  }
+  void _saveReplay(PairedDevice device, String model, CompletionWriter writer, ProviderKind fallback) {
+    if (writer.toolCalls.isEmpty) return;
+    final message = Message(role: Role.assistant, text: writer.text.toString(), toolCalls: writer.toolCalls);
+    _messageReplay[messageReplayKey(device.id, model, message)] =
+      (provider: writer.provider ?? fallback, blocks: writer.providerBlocks ?? const <Map<String, dynamic>>[]);
+    if (_messageReplay.length > 256) _messageReplay.remove(_messageReplay.keys.first);
+  }
+
   Future<void> _responses(HttpRequest req, PairedDevice device) async {
     final body = await _readJson(req);
     final input = parseResponsesRequest(body);
@@ -1277,21 +1431,7 @@ class HostServer extends ChangeNotifier {
     _checkToolAccess(device, parsed.tools.map((t) => t.name));
     final route = SharedModel.parseId(parsed.modelId);
     if (route == null) throw BridgeException('Invalid model id', status: 404);
-    for (final message in parsed.messages.where(
-      (m) => m.role == Role.assistant && m.toolCalls.isNotEmpty,
-    )) {
-      final replay =
-          _messageReplay[messageReplayKey(device.id, parsed.modelId, message)];
-      if (replay != null) {
-        message.provider = replay.provider;
-        message.providerBlocks = replay.blocks;
-      } else if (route.$1 == ProviderKind.gemini) {
-        throw BridgeException(
-          'Tool context expired on Main. Start a new chat.',
-          status: 409,
-        );
-      }
-    }
+    _restoreReplay(device, parsed, route.$1, route.$2);
     final reservation = await _reserve(device, parsed.modelId, 'chat', body);
     final requested = input.maxOutputTokens;
     final cap = reservation.maxOutputTokens;
@@ -1396,20 +1536,7 @@ class HostServer extends ChangeNotifier {
       if (failure != null) {
         throw failure!;
       }
-      if (writer.providerBlocks != null && writer.toolCalls.isNotEmpty) {
-        final message = Message(
-          role: Role.assistant,
-          text: writer.text.toString(),
-          toolCalls: writer.toolCalls,
-        );
-        _messageReplay[messageReplayKey(device.id, parsed.modelId, message)] = (
-          provider: route.$1,
-          blocks: writer.providerBlocks!,
-        );
-        if (_messageReplay.length > 256) {
-          _messageReplay.remove(_messageReplay.keys.first);
-        }
-      }
+      _saveReplay(device, parsed.modelId, writer, route.$1);
       final result = responsesMessage(
         id: id,
         model: parsed.modelId,
@@ -1478,21 +1605,7 @@ class HostServer extends ChangeNotifier {
     _checkToolAccess(device, parsed.tools.map((t) => t.name));
     final route = SharedModel.parseId(parsed.modelId);
     if (route == null) throw BridgeException('Invalid model id', status: 404);
-    for (final message in parsed.messages.where(
-      (m) => m.role == Role.assistant && m.toolCalls.isNotEmpty,
-    )) {
-      final replay =
-          _messageReplay[messageReplayKey(device.id, parsed.modelId, message)];
-      if (replay != null) {
-        message.provider = replay.provider;
-        message.providerBlocks = replay.blocks;
-      } else if (route.$1 == ProviderKind.gemini) {
-        throw BridgeException(
-          'The tool conversation context on Main expired. Start a new chat.',
-          status: 409,
-        );
-      }
-    }
+    _restoreReplay(device, parsed, route.$1, route.$2);
     final reservation = await _reserve(device, parsed.modelId, 'chat', body);
     final requested = body['max_tokens'] as int;
     final maximum = reservation.maxOutputTokens == null
@@ -1568,7 +1681,7 @@ class HostServer extends ChangeNotifier {
           // Native thinking must keep its original order and signature, so it is
           // emitted from the final signed blocks. Other providers stream text live.
           if (parsed.stream &&
-              route.$1 != ProviderKind.anthropic &&
+              (writer.provider ?? route.$1) != ProviderKind.anthropic &&
               delta.text.isNotEmpty) {
             if (!textStarted) {
               textStarted = true;
@@ -1610,24 +1723,11 @@ class HostServer extends ChangeNotifier {
       if (failure != null) {
         throw failure!;
       }
-      if (writer.providerBlocks != null && writer.toolCalls.isNotEmpty) {
-        final message = Message(
-          role: Role.assistant,
-          text: writer.text.toString(),
-          toolCalls: writer.toolCalls,
-        );
-        _messageReplay[messageReplayKey(device.id, parsed.modelId, message)] = (
-          provider: route.$1,
-          blocks: writer.providerBlocks!,
-        );
-        if (_messageReplay.length > 256) {
-          _messageReplay.remove(_messageReplay.keys.first);
-        }
-      }
+      _saveReplay(device, parsed.modelId, writer, route.$1);
       final content = anthropicContent(
         writer.text.toString(),
         writer.toolCalls,
-        nativeBlocks: route.$1 == ProviderKind.anthropic
+        nativeBlocks: (writer.provider ?? route.$1) == ProviderKind.anthropic
             ? writer.providerBlocks
             : null,
       );
@@ -1683,6 +1783,9 @@ class HostServer extends ChangeNotifier {
       );
       await saveDevices(devices);
       activeRequests--;
+      await onAnalytics?.call(LabRequestEvent(deviceId: device.id, device: device.name, model: parsed.modelId,
+        status: status, inputTokens: writer.usage.inputTokens, outputTokens: writer.usage.outputTokens,
+        durationMs: timing.elapsedMilliseconds, firstTokenMs: firstToken));
       _logEntry(device.name, parsed.modelId, status, writer.usage.outputTokens);
     }
   }
@@ -1701,6 +1804,7 @@ class HostServer extends ChangeNotifier {
         code: 'model_not_found',
       );
     }
+    if (route.$2.startsWith('auto:')) _restoreReplay(device, parsed, route.$1, route.$2);
     final reservation = await _reserve(device, parsed.modelId, 'chat', body);
     final (kind, model) = route;
     final writer = CompletionWriter(parsed.modelId)..provider = kind;
@@ -1782,6 +1886,7 @@ class HostServer extends ChangeNotifier {
         }
       }
     } finally {
+      if (status == 'ok') _saveReplay(device, parsed.modelId, writer, kind);
       activeRequests--;
       reservation.settle(
         inputTokens: writer.usage.inputTokens,

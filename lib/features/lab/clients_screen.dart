@@ -27,6 +27,11 @@ class ClientsScreen extends StatelessWidget {
     ),
   );
 
+  String _remaining(Map<String, dynamic> snapshot) {
+    final remaining = snapshot['remaining'] as Map;
+    return '${remaining['requests'] ?? 'Unlimited'} requests left · ${remaining['tokens'] ?? 'Unlimited'} tokens left${remaining['tokensReserved'] == true ? ' (includes active reservation)' : ''}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final host = AppScope.of(context).host;
@@ -128,6 +133,21 @@ class ClientsScreen extends StatelessWidget {
                         child: Text(
                           '${device.usage.day == ClientUsage.dayFor(DateTime.now()) ? device.usage.requests : 0} requests · '
                           '${device.usage.day == ClientUsage.dayFor(DateTime.now()) ? device.usage.tokens : 0} tokens today',
+                        ),
+                      ),
+                      if (host.server.accessStatus(device)['denialReason'] !=
+                          null)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Text(
+                            host.server.accessStatus(device)['denialReason']
+                                as String,
+                          ),
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Text(
+                          _remaining(host.server.accessStatus(device)),
                         ),
                       ),
                       if (device.accessRequested)
@@ -347,18 +367,19 @@ class _RulesDialogState extends State<_RulesDialog> {
                   }),
                 ),
               const SizedBox(height: 16),
-              const Text('Tools on the client PC'),
+              const Text('Allowed tools on this PC and Main'),
               CheckboxListTile(
-                title: const Text('Allow all client tools'),
+                title: const Text('Allow all tools'),
                 value: _allTools,
                 onChanged: (v) => setState(() => _allTools = v == true),
               ),
               if (!_allTools) ...[
-                if (widget.device.clientTools.isEmpty)
+                if (widget.server.toolChoicesFor(widget.device).isEmpty)
                   const Text(
-                    'The client has not reported its tools yet. No client tools will be allowed.',
+                    'No tools are available yet. Connect client tools or enable shared tools on Main.',
                   ),
-                for (final tool in widget.device.clientTools.entries)
+                for (final tool
+                    in widget.server.toolChoicesFor(widget.device).entries)
                   CheckboxListTile(
                     title: Text(tool.key),
                     subtitle: Text(tool.value),

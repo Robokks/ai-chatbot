@@ -32,7 +32,7 @@ void main() {
       final denied = await client.callTool(const CallToolRequest(name: 'web_search', arguments: {'query': 'LabVIEW'}));
       expect(denied.isError, isTrue);
       expect(searches, 0);
-      await host.updateAccess(device, ClientAccess(services: {'mcp', 'web_search'}, requestsPerDay: 1));
+      await host.updateAccess(device, ClientAccess(services: {'mcp', 'web_search'}, tools: {'phone_web_search'}, requestsPerDay: 1));
       final result = await client.callTool(const CallToolRequest(name: 'web_search', arguments: {'query': 'LabVIEW'}));
       expect(result.isError, isFalse);
       expect((result.content.single as TextContent).text, contains('LabVIEW help'));

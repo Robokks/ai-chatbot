@@ -28,6 +28,7 @@ void main() {
   late Uri base;
   late http.Client client;
   late List<int> payload;
+  late int assetId;
   late PairedDevice device;
   Future<http.Response> get(String path, {String? key = 'test-device-key'}) =>
       client.get(
@@ -35,6 +36,7 @@ void main() {
         headers: {if (key != null) 'Authorization': 'Bearer $key'},
       );
   setUp(() async {
+    assetId = 123;
     payload = List<int>.generate(128 * 1024, (i) => i % 256);
     directory = await Directory.systemTemp.createTemp('update-endpoint');
     cache = LanUpdateCache(
@@ -48,7 +50,7 @@ void main() {
               'assets': [
                 {
                   'name': windowsUpdateFilename,
-                  'id': 123,
+                  'id': assetId,
                   'size': payload.length,
                   'browser_download_url':
                       'https://github.com/Robokks/ai-chatbot/releases/download/latest/$windowsUpdateFilename',
@@ -73,6 +75,7 @@ void main() {
       loadDevices: () async => [device],
       saveDevices: (_) async {},
       updateCache: () async => cache,
+      updateAdvertisement: () async => cache.advertisement,
     );
     await server.start(port: 0, address: InternetAddress.loopbackIPv4);
     base = Uri.parse('http://127.0.0.1:${server.port}');
@@ -83,6 +86,17 @@ void main() {
     await server.stop();
     cache.close();
     await directory.delete(recursive: true);
+  });
+
+  test('access advertises only verified updates to PCs with explicit update access', () async {
+    var access = jsonDecode((await get('/access')).body) as Map;
+    expect((access['windowsUpdate'] as Map)['sha256'], cache.manifest!.sha256Hex);
+    device.access = ClientAccess(approved: true, services: {'chat'});
+    access = jsonDecode((await get('/access')).body) as Map;
+    expect(access['windowsUpdate'], isNull);
+    device.access = ClientAccess(approved: true, services: {'updates'}, blocked: true);
+    access = jsonDecode((await get('/access')).body) as Map;
+    expect(access['windowsUpdate'], isNull);
   });
 
   test('update endpoints authenticate, enforce explicit service and count downloads', () async {
@@ -163,10 +177,46 @@ void main() {
   });
 
   test(
+    'closing a client cancels its download and releases Main cache snapshot',
+    () async {
+      payload = List<int>.filled(16 * 1024 * 1024, 18);
+      assetId++;
+      await cache.refresh();
+      final downloader = LanUpdateClient(
+        baseUrl: base.toString(),
+        keyProvider: () async => device.key,
+      );
+      final download = downloader.downloadTo(
+        Directory('${directory.path}/client-download'),
+        cache.manifest!,
+      );
+      final finished = expectLater(download, throwsA(anything));
+      final started = Stopwatch()..start();
+      while (cache.activeDownloads == 0 &&
+          started.elapsed < const Duration(seconds: 5)) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      expect(cache.activeDownloads, 1);
+      downloader.close();
+      await finished;
+      while (cache.activeDownloads != 0 &&
+          started.elapsed < const Duration(seconds: 5)) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(cache.activeDownloads, 0);
+      expect(
+        await Directory('${directory.path}/client-download').list().toList(),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
     'cache refresh cannot replace a pinned active download generation',
     () async {
       final snapshot = await cache.openSnapshot();
       var refreshed = false;
+      assetId++;
       final future = cache.refresh().then((_) => refreshed = true);
       await Future<void>.delayed(const Duration(milliseconds: 30));
       expect(refreshed, isFalse);
