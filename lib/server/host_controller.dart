@@ -1,4 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
+
+import 'package:path_provider/path_provider.dart';
+
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -18,10 +22,22 @@ import 'client_access.dart';
 import 'client_connection.dart';
 import 'relay_forwarder.dart';
 import 'relay_protocol.dart';
+import 'package_proxy.dart';
+import 'lab_analytics.dart';
+import 'client_tools_controller.dart';
+import 'lan_updates.dart';
+import 'labview_approval_hub.dart';
+import '../tools/labview_integration.dart';
+import '../tools/tool_source.dart';
 
 /// Host mode: shares this device's models with the user's other devices.
-class HostController extends ChangeNotifier implements HostBackend, HostModelBackend {
+class HostController extends ChangeNotifier
+    implements HostBackend, HostModelBackend {
   HostController(this.app) {
+    analytics = LabAnalytics(app.storage);
+    clientTools = ClientToolsController(app);
+    labviewApprovals = LabviewApprovalHub.forStorage(app.storage);
+    labview = LabviewIntegration(app.storage, app.tools);
     agents = AgentHub(
       load: () => app.storage.getSetting('host.agents'),
       save: (v) => app.storage.setSetting('host.agents', v),
@@ -29,13 +45,51 @@ class HostController extends ChangeNotifier implements HostBackend, HostModelBac
     )..addListener(notifyListeners);
     server = HostServer(
       this,
+      onAnalytics: analytics.record,
+      updateCache: () => updatesCache,
+      extraTools: () => labview
+          .sharedTools()
+          .map(
+            (t) => SourceTool(
+              name: t.name,
+              description: t.description,
+              inputSchema: t.inputSchema,
+            ),
+          )
+          .toList(),
+      runExtraTool: (device, tool, arguments, cancel, recheck) =>
+          labviewApprovals.run(
+            device: device,
+            tool: tool,
+            arguments: arguments,
+            cancel: cancel,
+            execute: () async {
+              recheck();
+              if (!labview.sharedTools().any((t) => t.name == tool)) {
+                return const ToolOutput(
+                  'LabVIEW sharing is off.',
+                  isError: true,
+                );
+              }
+              final result = await app.tools.execute(
+                ToolCall(
+                  id: 'remote-labview',
+                  name: tool,
+                  arguments: arguments,
+                ),
+              );
+              return ToolOutput(result.text, isError: result.isError);
+            },
+          ),
       loadDevices: _loadDevices,
       saveDevices: _saveDevices,
       advertise: advertiseHost,
       agents: agentsSupported ? agents : null,
       webTools: app.tools.builtin,
-      webEnabled: (name) => app.tools.enabled && !app.tools.disabledBuiltins.contains(name),
-      approvalsRequired: () => app.labRole == LabRole.main || app.labRole == LabRole.relay,
+      webEnabled: (name) =>
+          app.tools.enabled && !app.tools.disabledBuiltins.contains(name),
+      approvalsRequired: () =>
+          app.labRole == LabRole.main || app.labRole == LabRole.relay,
     )..addListener(notifyListeners);
     app.sources.addListener(server.refreshRules);
     _load();
@@ -43,6 +97,19 @@ class HostController extends ChangeNotifier implements HostBackend, HostModelBac
 
   final AppState app;
   late final HostServer server;
+  late final LabAnalytics analytics;
+  late final ClientToolsController clientTools;
+  late final LabviewApprovalHub labviewApprovals;
+  late final LabviewIntegration labview;
+  Future<LanUpdateCache>? _updatesCache;
+  Future<LanUpdateCache> get updatesCache => _updatesCache ??= () async {
+    final root = await getApplicationSupportDirectory();
+    final cache = LanUpdateCache(
+      directory: Directory('${root.path}/lan-update-cache'),
+    );
+    await cache.load();
+    return cache;
+  }();
 
   /// Claude Code / Codex sharing (PC only).
   late final AgentHub agents;
@@ -64,6 +131,9 @@ class HostController extends ChangeNotifier implements HostBackend, HostModelBac
   ];
 
   bool shareLocal = true;
+  bool packageProxyEnabled = false;
+  PackageProxy? packageProxy;
+  int? _upstreamProxyPort;
   final Set<ProviderKind> sharedCloud = {};
   int port = defaultHostPort;
   String _name = 'Chatbot host';
@@ -78,12 +148,14 @@ class HostController extends ChangeNotifier implements HostBackend, HostModelBac
     if (raw != null) {
       final j = jsonDecode(raw) as Map<String, dynamic>;
       shareLocal = j['shareLocal'] as bool? ?? true;
+      packageProxyEnabled = j['packageProxy'] as bool? ?? false;
       server.stopAll = j['stopAll'] as bool? ?? false;
       port = j['port'] as int? ?? defaultHostPort;
       sharedCloud
         ..clear()
         ..addAll([
-          for (final n in (j['cloud'] as List? ?? const [])) ?ProviderKind.values.asNameMap()[n],
+          for (final n in (j['cloud'] as List? ?? const []))
+            ?ProviderKind.values.asNameMap()[n],
         ]);
     }
     readDeviceStats().then((d) {
@@ -93,29 +165,36 @@ class HostController extends ChangeNotifier implements HostBackend, HostModelBac
   }
 
   Future<void> _save() => app.storage.setSetting(
-        'host.settings',
-        jsonEncode({
-          'shareLocal': shareLocal,
-          'port': port,
-          'stopAll': server.stopAll,
-          'cloud': [for (final k in sharedCloud) k.name],
-        }),
-      );
+    'host.settings',
+    jsonEncode({
+      'shareLocal': shareLocal,
+      'packageProxy': packageProxyEnabled,
+      'port': port,
+      'stopAll': server.stopAll,
+      'cloud': [for (final k in sharedCloud) k.name],
+    }),
+  );
 
   Future<List<PairedDevice>> _loadDevices() async {
     final raw = await app.storage.readSecret('host.devices');
     if (raw == null) return [];
     return [
-      for (final e in jsonDecode(raw) as List) PairedDevice.fromJson(Map<String, dynamic>.from(e)),
+      for (final e in jsonDecode(raw) as List)
+        PairedDevice.fromJson(Map<String, dynamic>.from(e)),
     ];
   }
 
-  Future<void> _saveDevices(List<PairedDevice> d) =>
-      app.storage.writeSecret('host.devices', jsonEncode([for (final x in d) x.toJson()]));
+  Future<void> _saveDevices(List<PairedDevice> d) => app.storage.writeSecret(
+    'host.devices',
+    jsonEncode([for (final x in d) x.toJson()]),
+  );
 
   Future<void> setStopAll(bool stopped) async {
     server.stopAll = stopped;
-    if (stopped) agents.denyAll();
+    if (stopped) {
+      agents.denyAll();
+      labviewApprovals.denyAll();
+    }
     await _save();
     notifyListeners();
   }
@@ -136,20 +215,36 @@ class HostController extends ChangeNotifier implements HostBackend, HostModelBac
 
   @override
   List<SharedModel> sharedModels() => [
-        if (shareLocal && app.hasKey(ProviderKind.local))
-          for (final id in app.providers[ProviderKind.local]!.models)
-            SharedModel(ProviderKind.local, id, displayName: app.localModels.byId(id)?.name),
-        for (final k in shareableCloud)
-          if (sharedCloud.contains(k) && app.hasKey(k))
-            for (final m in app.providers[k]!.models) SharedModel(k, m),
-        for (final source in app.sources.all)
-          if (source.enabled && source.shared)
-            for (final model in source.models)
-              SharedModel(source.kind, source.route(model), displayName: '${source.name} · $model'),
-      ];
+    if (shareLocal && app.hasKey(ProviderKind.local))
+      for (final id in app.providers[ProviderKind.local]!.models)
+        SharedModel(
+          ProviderKind.local,
+          id,
+          displayName: app.localModels.byId(id)?.name,
+        ),
+    for (final k in shareableCloud)
+      if (sharedCloud.contains(k) && app.hasKey(k))
+        for (final m in app.providers[k]!.models) SharedModel(k, m),
+    for (final chain in app.sources.chains)
+      if (chain.enabled && chain.shared)
+        SharedModel(
+          app.sources.kindForChain(chain),
+          chain.route,
+          displayName: 'Auto · ${chain.name}',
+        ),
+    for (final source in app.sources.all)
+      if (source.enabled && source.shared)
+        for (final model in source.models)
+          SharedModel(
+            source.kind,
+            source.route(model),
+            displayName: '${source.name} · $model',
+          ),
+  ];
 
   @override
-  LlmProvider providerForModel(ProviderKind kind, String model) => app.providerFor(kind, modelId: model);
+  LlmProvider providerForModel(ProviderKind kind, String model) =>
+      app.providerFor(kind, modelId: model);
 
   @override
   LlmProvider providerFor(ProviderKind kind) => app.providerFor(kind);
@@ -162,36 +257,75 @@ class HostController extends ChangeNotifier implements HostBackend, HostModelBac
     if (server.running) return;
     error = null;
     try {
-      if (app.labRole == LabRole.client) throw StateError('Choose Relay in Settings to share Main with downstream PCs.');
+      if (app.labRole == LabRole.client) {
+        throw StateError(
+          'Choose Relay in Settings to share Main with downstream PCs.',
+        );
+      }
       if (app.labRole == LabRole.relay) {
-        if (!app.hasKey(ProviderKind.network)) throw StateError('Connect to Main before starting a relay.');
+        if (!app.hasKey(ProviderKind.network)) {
+          throw StateError('Connect to Main before starting a relay.');
+        }
         final settings = app.providers[ProviderKind.network]!;
         final key = app.keyFor(ProviderKind.network);
         final connection = ClientConnection(settings.baseUrl, key);
         try {
           final access = await connection.access();
-          final policy = ClientAccess.fromJson(Map<String, dynamic>.from(access['access'] as Map));
+          final policy = ClientAccess.fromJson(
+            Map<String, dynamic>.from(access['access'] as Map),
+          );
           policy.check(stopped: access['stopped'] == true, service: 'relay');
-          if (policy.services?.contains('relay') != true) throw StateError('Main must allow Relay forwarding for this PC in Clients → Rules.');
-          if (access['id'] is! String || access['serverTime'] is! int) throw StateError('Update Main before using relay mode.');
-          server.relay = RelayForwarder(upstream: Uri.parse(settings.baseUrl),
-            identity: RelayIdentity(access['id'] as String, key,
-              (access['via'] as List? ?? []).map((v) => (v as Map)['id'] as String).toList()),
-            clockOffset: Duration(milliseconds: (access['serverTime'] as int) - DateTime.now().toUtc().millisecondsSinceEpoch),
-            mcpPort: () => server.mcpPort);
-        } finally { connection.close(); }
-      } else if (agentsSupported) { await agents.ensureDetected(); }
+          if (policy.services?.contains('relay') != true) {
+            throw StateError(
+              'Main must allow Relay forwarding for this PC in Clients → Rules.',
+            );
+          }
+          if (access['id'] is! String || access['serverTime'] is! int) {
+            throw StateError('Update Main before using relay mode.');
+          }
+          _upstreamProxyPort = access['proxyPort'] as int?;
+          server.relay = RelayForwarder(
+            upstream: Uri.parse(settings.baseUrl),
+            identity: RelayIdentity(
+              access['id'] as String,
+              key,
+              (access['via'] as List? ?? [])
+                  .map((v) => (v as Map)['id'] as String)
+                  .toList(),
+            ),
+            clockOffset: Duration(
+              milliseconds:
+                  (access['serverTime'] as int) -
+                  DateTime.now().toUtc().millisecondsSinceEpoch,
+            ),
+            mcpPort: () => server.mcpPort,
+            proxyPort: () => server.packageProxyPort,
+          );
+        } finally {
+          connection.close();
+        }
+      } else if (agentsSupported) {
+        await agents.ensureDetected();
+      }
       await server.start(port: port);
+      await _startPackageProxy();
       addresses = await HostServer.localAddresses();
       if (addresses.isEmpty) {
         error = 'No local network address found. Connect this PC to Ethernet or Wi-Fi.';
       }
       await HostForegroundService.start(primaryAddress ?? 'this device');
     } on SocketException catch (e) {
-      error = 'Could not start the server on port $port (${e.osError?.message ?? e.message}).';
+      error =
+          'Could not start the server on port $port (${e.osError?.message ?? e.message}).';
+      await packageProxy?.stop();
+      packageProxy = null;
+      server.packageProxyPort = null;
       await server.stop();
     } catch (e) {
       error = '$e';
+      await packageProxy?.stop();
+      packageProxy = null;
+      server.packageProxyPort = null;
       await server.stop();
     }
     notifyListeners();
@@ -199,9 +333,52 @@ class HostController extends ChangeNotifier implements HostBackend, HostModelBac
 
   Future<void> stop() async {
     agents.denyAll();
+    labviewApprovals.denyAll();
+    await packageProxy?.stop();
+    packageProxy = null;
+    server.packageProxyPort = null;
     await server.stop();
+    await analytics.flush();
     await HostForegroundService.stop();
     notifyListeners();
+  }
+
+  Future<void> setPackageProxy(bool enabled) async {
+    packageProxyEnabled = enabled;
+    await packageProxy?.stop();
+    packageProxy = null;
+    server.packageProxyPort = null;
+    if (enabled && server.running) {
+      try {
+        await _startPackageProxy();
+      } catch (e) {
+        error = 'Package proxy could not start: $e';
+      }
+    }
+    await _save();
+    notifyListeners();
+  }
+
+  Future<void> _startPackageProxy() async {
+    if (!packageProxyEnabled) return;
+    final relay = server.relay;
+    if (relay != null && _upstreamProxyPort == null) {
+      throw StateError('Enable the package proxy on Main first.');
+    }
+    final proxy = PackageProxy(
+      authorize: relay == null ? server.authorizePackageProxy : null,
+      upstream: relay == null
+          ? null
+          : ProxyUpstream(
+              host: relay.upstream.host,
+              port: _upstreamProxyPort!,
+              identity: relay.identity,
+              clockOffset: () => relay.clockOffset,
+            ),
+    );
+    packageProxy = proxy;
+    await proxy.start(port: port + 2);
+    server.packageProxyPort = proxy.port;
   }
 
   @override
@@ -209,6 +386,11 @@ class HostController extends ChangeNotifier implements HostBackend, HostModelBac
     app.sources.removeListener(server.refreshRules);
     server.removeListener(notifyListeners);
     agents.removeListener(notifyListeners);
+    clientTools.dispose();
+    labviewApprovals.dispose();
+    final cache = _updatesCache;
+    if (cache != null) unawaited(cache.then((v) => v.close()));
+    analytics.dispose();
     super.dispose();
   }
 }

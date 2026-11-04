@@ -1,3 +1,5 @@
+import 'features/lab/labview_approval_overlay.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -29,8 +31,13 @@ class ChatApp extends StatelessWidget {
           // Claude Code / Codex run requests from paired devices pop up on
           // top of whatever screen is open.
           builder: HostController.agentsSupported
-              ? (context, child) =>
-                    AgentApprovalOverlay(hub: state.host.agents, child: child!)
+              ? (context, child) => LabviewApprovalOverlay(
+                  hub: state.host.labviewApprovals,
+                  child: AgentApprovalOverlay(
+                    hub: state.host.agents,
+                    child: child!,
+                  ),
+                )
               : null,
           routes: {
             '/': (_) => const _StartScreen(),
@@ -48,7 +55,8 @@ class _StartScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
-    if (defaultTargetPlatform == TargetPlatform.windows && state.labRole == null) {
+    if (defaultTargetPlatform == TargetPlatform.windows &&
+        state.labRole == null) {
       return const RolePicker();
     }
     return const HomeShell();

@@ -13,6 +13,7 @@ import '../data/local/local_models.dart';
 import '../data/models.dart';
 import '../data/lab_role.dart';
 import '../server/discovery.dart';
+import '../server/lab_analytics.dart';
 import '../server/host_controller.dart';
 import '../tools/tool_registry.dart';
 import '../tools/tool_source.dart';
@@ -76,6 +77,7 @@ class AppState extends ChangeNotifier {
   String model = ProviderKind.anthropic.models.first;
 
   StreamSubscription<ChatDelta>? _sub;
+  LlmProvider? _activeProvider;
   Completer<void>? _done;
   Message? streamingMessage;
   bool get isStreaming => streamingMessage != null;
@@ -145,6 +147,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _activeProvider?.client.close();
     localModels.removeListener(_syncLocalModels);
     sources.removeListener(notifyListeners);
     super.dispose();
@@ -439,45 +442,97 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> _stream(Message reply, List<Message> history, List<ToolSpec> offered) async {
-    final llm = _providerFactory(providers[provider]!, keyFor(provider));
+  Future<void> _stream(
+    Message reply,
+    List<Message> history,
+    List<ToolSpec> offered,
+  ) async {
     final done = _done = Completer<void>();
-    _sub = llm
-        .streamChat(ChatRequest(
-          model: model,
-          messages: history,
-          systemPrompt: systemPrompt,
-          tools: offered,
-        ))
-        .listen(
-          (d) {
-            streamingStatus =
-                d.text.isEmpty && d.reasoning.isEmpty ? d.status ?? streamingStatus : null;
-            if (d.usage != null) reply.usage!.merge(d.usage!);
-            if ((d.text.isNotEmpty || d.reasoning.isNotEmpty || d.toolCalls.isNotEmpty) &&
-                reply.usage!.firstTokenMs == null) {
-              reply.usage!.firstTokenMs = _clock?.elapsedMilliseconds;
-            }
-            reply.text += d.text;
-            reply.reasoning += d.reasoning;
-            reply.toolCalls.addAll(d.toolCalls);
-            if (d.providerBlocks != null) reply.providerBlocks = d.providerBlocks;
-            if (d.routingInfo != null) reply.routingInfo = d.routingInfo;
-            if (d.notice != null) reply.error = d.notice;
-            notifyListeners();
-          },
-          onError: (Object e) {
-            reply.error = e is LlmException ? e.message : 'Connection failed: $e';
-            if (!done.isCompleted) done.complete();
-          },
-          onDone: () {
-            if (!done.isCompleted) done.complete();
-          },
-          cancelOnError: true,
-        );
-    await done.future;
-    _sub = null;
-    _done = null;
+    final selectedKind = provider;
+    final selectedModel = model;
+    final watch = Stopwatch()..start();
+    LlmProvider? llm;
+    try {
+      llm = _activeProvider = providerFor(selectedKind, modelId: selectedModel);
+      _sub = llm
+          .streamChat(
+            ChatRequest(
+              model: selectedModel,
+              messages: history,
+              systemPrompt: systemPrompt,
+              tools: offered,
+            ),
+          )
+          .listen(
+            (d) {
+              streamingStatus = d.text.isEmpty && d.reasoning.isEmpty
+                  ? d.status ?? streamingStatus
+                  : null;
+              if (d.usage != null) reply.usage!.merge(d.usage!);
+              if ((d.text.isNotEmpty ||
+                      d.reasoning.isNotEmpty ||
+                      d.toolCalls.isNotEmpty) &&
+                  reply.usage!.firstTokenMs == null) {
+                reply.usage!.firstTokenMs = _clock?.elapsedMilliseconds;
+              }
+              reply.text += d.text;
+              reply.reasoning += d.reasoning;
+              reply.toolCalls.addAll(d.toolCalls);
+              if (d.providerBlocks != null) {
+                reply.providerBlocks = d.providerBlocks;
+              }
+              if (d.routingInfo != null) reply.routingInfo = d.routingInfo;
+              if (d.notice != null) reply.error = d.notice;
+              notifyListeners();
+            },
+            onError: (Object e) {
+              reply.error = e is LlmException
+                  ? e.message
+                  : 'Connection failed: $e';
+              if (!done.isCompleted) done.complete();
+            },
+            onDone: () {
+              if (!done.isCompleted) done.complete();
+            },
+            cancelOnError: true,
+          );
+      await done.future;
+    } catch (error) {
+      reply.error = error is LlmException
+          ? error.message
+          : 'Connection failed: $error';
+      if (!done.isCompleted) done.complete();
+    } finally {
+      llm?.client.close();
+      if (_sub != null) await _sub!.cancel();
+      _activeProvider = null;
+      _sub = null;
+      _done = null;
+      _closeTiming(reply);
+      if (!demoMode && selectedKind != ProviderKind.network) {
+        try {
+          await host.analytics.record(
+            LabRequestEvent(
+              deviceId: 'local',
+              device: 'This PC',
+              model: '${selectedKind.name}/$selectedModel',
+              status: _stopped
+                  ? 'cancelled'
+                  : reply.error == null
+                  ? 'ok'
+                  : 'error',
+              inputTokens: reply.usage?.inputTokens,
+              outputTokens: reply.usage?.outputTokens,
+              durationMs: watch.elapsedMilliseconds,
+              firstTokenMs: reply.usage?.firstTokenMs,
+            ),
+          );
+          await host.analytics.flush();
+        } catch (_) {
+          /* Reporting must not interrupt the chat. */
+        }
+      }
+    }
   }
 
   void _closeTiming(Message reply) {
@@ -523,6 +578,7 @@ class AppState extends ChangeNotifier {
   void stop() {
     _stopped = true;
     answerApproval(false);
+    _activeProvider?.client.close();
     _sub?.cancel();
     if (!(_done?.isCompleted ?? true)) _done!.complete();
   }

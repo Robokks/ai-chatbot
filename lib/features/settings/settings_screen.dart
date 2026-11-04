@@ -12,6 +12,8 @@ import '../host/host_screen.dart';
 import '../tools/tools_screen.dart';
 import 'local_models_screen.dart';
 import 'usage_screen.dart';
+import '../lab/client_tools_screen.dart';
+import '../lab/app_updates_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -54,7 +56,10 @@ class SettingsScreen extends StatelessWidget {
           _Card(
             children: [
               ListTile(
-                leading: const ProviderAvatar(kind: ProviderKind.network, size: 32),
+                leading: const ProviderAvatar(
+                  kind: ProviderKind.network,
+                  size: 32,
+                ),
                 title: const Text('Connect to a home server'),
                 subtitle: Text(
                   state.hasKey(ProviderKind.network)
@@ -63,9 +68,11 @@ class SettingsScreen extends StatelessWidget {
                   style: TextStyle(color: p.textMuted),
                 ),
                 trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                  builder: (_) => const ConnectScreen(),
-                )),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const ConnectScreen(),
+                  ),
+                ),
               ),
               if (HostController.supported)
                 ListTile(
@@ -78,9 +85,9 @@ class SettingsScreen extends StatelessWidget {
                     style: TextStyle(color: p.textMuted),
                   ),
                   trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => const HostScreen(),
-                  )),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const HostScreen()),
+                  ),
                 ),
             ],
           ),
@@ -130,13 +137,13 @@ class SettingsScreen extends StatelessWidget {
                   state.tools.configs.isEmpty
                       ? 'MCP, UTCP, A2A agents and command-line programs'
                       : '${state.tools.configs.length} source${state.tools.configs.length == 1 ? '' : 's'}'
-                          ' · ${state.tools.activeTools().length} tools',
+                            ' · ${state.tools.activeTools().length} tools',
                   style: TextStyle(color: p.textMuted),
                 ),
                 trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                  builder: (_) => const ToolsScreen(),
-                )),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const ToolsScreen()),
+                ),
               ),
             ],
           ),
@@ -146,29 +153,67 @@ class SettingsScreen extends StatelessWidget {
               ListTile(
                 leading: const Icon(Icons.insights_outlined),
                 title: const Text('Usage & storage'),
-                subtitle: Text('Device memory, storage and AI usage',
-                    style: TextStyle(color: p.textMuted)),
+                subtitle: Text(
+                  'Device memory, storage and AI usage',
+                  style: TextStyle(color: p.textMuted),
+                ),
                 trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                  builder: (_) => const UsageScreen(),
-                )),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const UsageScreen()),
+                ),
               ),
             ],
           ),
           const _SectionTitle('Lab'),
-          _Card(children: [
+          _Card(
+            children: [
+              ListTile(
+                title: const Text('Device role'),
+                subtitle: Text(
+                  state.labRole?.description ??
+                      'Choose how this PC will be used',
+                ),
+                trailing: DropdownButton<LabRole>(
+                  value: state.labRole,
+                  hint: const Text('Choose'),
+                  items: [
+                    for (final role in LabRole.values)
+                      DropdownMenuItem(value: role, child: Text(role.label)),
+                  ],
+                  onChanged: (role) {
+                    if (role != null) state.setLabRole(role);
+                  },
+                ),
+              ),
+            ],
+          ),
+          if (HostController.agentsSupported && state.labRole != LabRole.main)
             ListTile(
-              title: const Text('Device role'),
-              subtitle: Text(state.labRole?.description ?? 'Choose how this PC will be used'),
-              trailing: DropdownButton<LabRole>(
-                value: state.labRole,
-                hint: const Text('Choose'),
-                items: [for (final role in LabRole.values)
-                  DropdownMenuItem(value: role, child: Text(role.label))],
-                onChanged: (role) { if (role != null) state.setLabRole(role); },
+              leading: const Icon(Icons.terminal),
+              title: const Text('Coding tools and package access'),
+              subtitle: const Text(
+                'Use Main from Claude Code, Codex, git, pip and npm on this PC',
+              ),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      ClientToolsScreen(controller: state.host.clientTools),
+                ),
               ),
             ),
-          ]),
+          if (HostController.supported)
+            ListTile(
+              leading: const Icon(Icons.system_update_outlined),
+              title: const Text('LAN Windows updates'),
+              subtitle: const Text(
+                'Main caches updates; clients download through Main',
+              ),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const AppUpdatesScreen(),
+                ),
+              ),
+            ),
           const _SectionTitle('Appearance'),
           _Card(
             children: [
@@ -177,8 +222,14 @@ class SettingsScreen extends StatelessWidget {
                 trailing: DropdownButton<AppThemeStyle>(
                   value: state.themeStyle,
                   items: const [
-                    DropdownMenuItem(value: AppThemeStyle.cream, child: Text('Cream')),
-                    DropdownMenuItem(value: AppThemeStyle.minimal, child: Text('White / black')),
+                    DropdownMenuItem(
+                      value: AppThemeStyle.cream,
+                      child: Text('Cream'),
+                    ),
+                    DropdownMenuItem(
+                      value: AppThemeStyle.minimal,
+                      child: Text('White / black'),
+                    ),
                   ],
                   onChanged: (style) {
                     if (style != null) state.setThemeStyle(style);

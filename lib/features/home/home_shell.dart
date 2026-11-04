@@ -10,6 +10,7 @@ import '../settings/settings_screen.dart';
 import '../tools/tools_screen.dart';
 import '../lab/clients_screen.dart';
 import '../lab/logs_screen.dart';
+import '../lab/analytics_screen.dart';
 import '../lab/models_screen.dart';
 import '../lab/client_status_bar.dart';
 
@@ -32,6 +33,7 @@ class _HomeShellState extends State<HomeShell> {
     'Tools',
     'Logs',
     'Settings',
+    'Analytics',
   ];
   static const _icons = [
     Icons.chat_bubble_outline,
@@ -40,6 +42,7 @@ class _HomeShellState extends State<HomeShell> {
     Icons.build_outlined,
     Icons.article_outlined,
     Icons.settings_outlined,
+    Icons.analytics_outlined,
   ];
 
   static const _wideBreakpoint = 900.0;
@@ -49,7 +52,10 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width >= _wideBreakpoint;
     final state = AppScope.of(context);
-    final pages = (state.labRole == LabRole.client || state.labRole == LabRole.relay) ? [0, 3, 5] : [0, 1, 2, 3, 4, 5];
+    final pages =
+        (state.labRole == LabRole.client || state.labRole == LabRole.relay)
+        ? [0, 3, 5]
+        : [0, 1, 2, 3, 6, 4, 5];
 
     final Widget content;
     if (wide) {
@@ -107,10 +113,13 @@ class _HomeShellState extends State<HomeShell> {
           Expanded(
             child: switch (_selectedPage) {
               0 => const ChatScreen(),
-              1 => ModelsScreen(onChat: () => setState(() => _selectedPage = 0)),
+              1 => ModelsScreen(
+                onChat: () => setState(() => _selectedPage = 0),
+              ),
               2 => const ClientsScreen(),
               3 => const ToolsScreen(),
-              4 => const LogsScreen(),
+              4 => LogsScreen(analytics: state.host.analytics),
+              6 => AnalyticsScreen(analytics: state.host.analytics),
               5 => const SettingsScreen(),
               _ => Scaffold(
                 appBar: AppBar(title: Text(_pages[_selectedPage])),
@@ -149,11 +158,14 @@ class _HomeShellState extends State<HomeShell> {
                   width: MediaQuery.sizeOf(context).width * 0.84,
                   child: Sidebar(onNavigate: () => Navigator.of(context).pop()),
                 ),
-          body: Column(children: [
-            if (state.labRole == LabRole.client || state.labRole == LabRole.relay)
-              const SafeArea(bottom: false, child: ClientStatusBar()),
-            Expanded(child: content),
-          ]),
+          body: Column(
+            children: [
+              if (state.labRole == LabRole.client ||
+                  state.labRole == LabRole.relay)
+                const SafeArea(bottom: false, child: ClientStatusBar()),
+              Expanded(child: content),
+            ],
+          ),
         ),
       ),
     );
