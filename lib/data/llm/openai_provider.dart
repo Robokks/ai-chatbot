@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../models.dart';
 import 'llm_provider.dart';
 import 'sse.dart';
+import 'cloudflare_models.dart';
 
 /// OpenAI Chat Completions, also used for DeepSeek, OpenRouter, Groq and any
 /// OpenAI-compatible server (Ollama, LM Studio, vLLM...).
@@ -167,6 +168,12 @@ class OpenAiProvider extends LlmProvider {
       if (choices == null || choices.isEmpty) continue;
       final choice = choices.first as Map<String, dynamic>;
       final delta = choice['delta'] as Map<String, dynamic>? ?? const {};
+      if (kind == ProviderKind.network) {
+        hostProvider = ProviderKind.values.asNameMap()[delta['x_provider']] ?? hostProvider;
+        if (delta['x_routing_info'] is String || delta['x_provider'] is String) {
+          yield ChatDelta(routingInfo: delta['x_routing_info'] as String?, providerKind: hostProvider);
+        }
+      }
       final blocks = delta['x_provider_blocks'];
       if (kind == ProviderKind.network && blocks is List) {
         hostProvider = ProviderKind.values.asNameMap()[delta['x_provider']];
@@ -199,6 +206,7 @@ class OpenAiProvider extends LlmProvider {
     if (calls.isNotEmpty) {
       final keys = calls.keys.toList()..sort();
       yield ChatDelta(
+          providerKind: kind == ProviderKind.network ? hostProvider : null,
           providerBlocks: hostBlocks == null ? null : [
             {'x_provider': hostProvider?.name},
             ...hostBlocks,
@@ -217,6 +225,12 @@ class OpenAiProvider extends LlmProvider {
 
   @override
   Future<List<String>> listModels() async {
+    if (cloudflareModelsEndpoint(baseUrl) != null) {
+      return fetchCloudflareModels(baseUrl: baseUrl, get: (uri) async {
+        final response = await send(http.Request('GET', uri)..headers.addAll(_headers));
+        return response.stream.bytesToString();
+      });
+    }
     final res = await send(
         http.Request('GET', Uri.parse('$baseUrl/models'))..headers.addAll(_headers));
     final j = jsonDecode(await res.stream.bytesToString());
