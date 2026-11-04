@@ -10,6 +10,7 @@ import '../settings/settings_screen.dart';
 import '../tools/tools_screen.dart';
 import '../lab/clients_screen.dart';
 import '../lab/logs_screen.dart';
+import '../lab/models_screen.dart';
 import '../lab/client_status_bar.dart';
 
 /// Conversation drawer on phones, app menu and chat history on wide screens.
@@ -106,6 +107,7 @@ class _HomeShellState extends State<HomeShell> {
           Expanded(
             child: switch (_selectedPage) {
               0 => const ChatScreen(),
+              1 => ModelsScreen(onChat: () => setState(() => _selectedPage = 0)),
               2 => const ClientsScreen(),
               3 => const ToolsScreen(),
               4 => const LogsScreen(),

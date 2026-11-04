@@ -16,7 +16,7 @@ import 'host_server.dart';
 import 'openai_bridge.dart';
 
 /// Host mode: shares this device's models with the user's other devices.
-class HostController extends ChangeNotifier implements HostBackend {
+class HostController extends ChangeNotifier implements HostBackend, HostModelBackend {
   HostController(this.app) {
     agents = AgentHub(
       load: () => app.storage.getSetting('host.agents'),
@@ -33,6 +33,7 @@ class HostController extends ChangeNotifier implements HostBackend {
       webEnabled: (name) => app.tools.enabled && !app.tools.disabledBuiltins.contains(name),
       approvalsRequired: () => app.labRole == LabRole.main || app.labRole == LabRole.relay,
     )..addListener(notifyListeners);
+    app.sources.addListener(server.refreshRules);
     _load();
   }
 
@@ -117,12 +118,14 @@ class HostController extends ChangeNotifier implements HostBackend {
 
   Future<void> setShareLocal(bool v) async {
     shareLocal = v;
+    server.refreshRules();
     await _save();
     notifyListeners();
   }
 
   Future<void> setShareCloud(ProviderKind k, bool v) async {
     v ? sharedCloud.add(k) : sharedCloud.remove(k);
+    server.refreshRules();
     await _save();
     notifyListeners();
   }
@@ -135,7 +138,14 @@ class HostController extends ChangeNotifier implements HostBackend {
         for (final k in shareableCloud)
           if (sharedCloud.contains(k) && app.hasKey(k))
             for (final m in app.providers[k]!.models) SharedModel(k, m),
+        for (final source in app.sources.all)
+          if (source.enabled && source.shared)
+            for (final model in source.models)
+              SharedModel(source.kind, source.route(model), displayName: '${source.name} · $model'),
       ];
+
+  @override
+  LlmProvider providerForModel(ProviderKind kind, String model) => app.providerFor(kind, modelId: model);
 
   @override
   LlmProvider providerFor(ProviderKind kind) => app.providerFor(kind);
@@ -170,6 +180,7 @@ class HostController extends ChangeNotifier implements HostBackend {
 
   @override
   void dispose() {
+    app.sources.removeListener(server.refreshRules);
     server.removeListener(notifyListeners);
     agents.removeListener(notifyListeners);
     super.dispose();

@@ -7,6 +7,7 @@ import '../core/storage.dart';
 import '../core/theme.dart';
 import '../data/llm/demo_provider.dart';
 import '../data/llm/llm_provider.dart';
+import '../data/llm/named_sources.dart';
 import '../data/llm/local_provider.dart';
 import '../data/local/local_models.dart';
 import '../data/models.dart';
@@ -28,14 +29,18 @@ class AppState extends ChangeNotifier {
     LlmProvider Function(ProviderSettings, String)? providerFactory,
     LocalModelStore? localModels,
     ToolRegistry? tools,
+    NamedSources? sources,
   })  : localModels = localModels ?? LocalModelStore(storage),
-        tools = tools ?? ToolRegistry(storage) {
+        tools = tools ?? ToolRegistry(storage),
+        sources = sources ?? NamedSources(storage) {
     _providerFactory = providerFactory ?? _defaultProvider;
     this.localModels.addListener(_syncLocalModels);
     this.tools.hostWeb = _hostWeb;
+    this.sources.addListener(notifyListeners);
   }
 
   final Storage storage;
+  final NamedSources sources;
 
   /// Host mode: sharing this device's models on the local network.
   late final HostController host = HostController(this);
@@ -98,6 +103,7 @@ class AppState extends ChangeNotifier {
         ProviderKind.anthropic;
     model = storage.getSetting('model') ?? providers[provider]!.models.firstOrNull ?? '';
     conversations = storage.loadConversations();
+    await sources.load();
     await tools.load();
     if (!demoMode) unawaited(tools.connectAll());
     if (localSupported) {
@@ -140,6 +146,7 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     localModels.removeListener(_syncLocalModels);
+    sources.removeListener(notifyListeners);
     super.dispose();
   }
 
@@ -161,7 +168,12 @@ class AppState extends ChangeNotifier {
   }
 
   /// A provider ready to chat with [k] using its saved settings and key.
-  LlmProvider providerFor(ProviderKind k) => _providerFactory(providers[k]!, keyFor(k));
+  LlmProvider providerFor(ProviderKind k, {String? modelId}) {
+    final route = modelId ?? (k == provider ? model : '');
+    final source = sources.forRoute(k, route);
+    if (route.startsWith('source:') && source == null) throw LlmException('This AI source is no longer available.');
+    return source == null ? _providerFactory(providers[k]!, keyFor(k)) : sources.provider(source, route);
+  }
 
   /// Name of the host this device is paired with, if any.
   String? get connectedHostName => storage.getSetting('network.hostName');
@@ -363,7 +375,7 @@ class AppState extends ChangeNotifier {
         reply.error = 'Connect to Main and request access to a model first.';
         return _finish(c);
       }
-      if (!hasKey(provider)) {
+      if (!hasKey(provider) && sources.forRoute(provider, model) == null) {
         reply.error = provider == ProviderKind.local
             ? 'Download an on-device model in Settings first.'
             : 'Add a ${provider.label} API key in Settings to start chatting.';

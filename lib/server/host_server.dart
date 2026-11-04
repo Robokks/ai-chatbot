@@ -22,6 +22,11 @@ abstract class HostBackend {
   LlmProvider providerFor(ProviderKind kind);
 }
 
+/// Optional routing support for named sources. Legacy test/backends stay compatible.
+abstract class HostModelBackend {
+  LlmProvider providerForModel(ProviderKind kind, String model);
+}
+
 /// A device (or app) allowed to use the host.
 class PairedDevice {
   PairedDevice({
@@ -273,6 +278,8 @@ class HostServer extends ChangeNotifier {
     finally { unwatch(); reservation.settle(); _logEntry(d.name, tool, status, null); }
   }
 
+  void refreshRules() => notifyListeners();
+
   VoidCallback _watchAccess(String id, String service, VoidCallback onRevoked) {
     void inspect() {
       try { _deviceById(id).access.check(stopped: stopAll, service: service); }
@@ -296,7 +303,10 @@ class HostServer extends ChangeNotifier {
       unawaited(out.close());
     }
     void inspect() {
-      try { _deviceById(device.id).access.check(stopped: stopAll, model: model, service: service); }
+      try {
+        _deviceById(device.id).access.check(stopped: stopAll, model: model, service: service);
+        if (!backend.sharedModels().any((m) => m.id == model)) throw BridgeException('This model is no longer shared.', status: 403);
+      }
       catch (e) { fail(e); }
     }
     out = StreamController<ChatDelta>(onListen: () {
@@ -317,7 +327,8 @@ class HostServer extends ChangeNotifier {
     late StreamController<ChatDelta> out;
     out = StreamController<ChatDelta>(onListen: () {
       try {
-        provider = backend.providerFor(kind);
+        final routed = backend;
+        provider = routed is HostModelBackend ? (routed as HostModelBackend).providerForModel(kind, request.model) : backend.providerFor(kind);
         subscription = provider!.streamChat(request).listen(out.add,
             onError: out.addError, onDone: () { unawaited(out.close()); });
       } catch (e, stack) { out.addError(e, stack); unawaited(out.close()); }

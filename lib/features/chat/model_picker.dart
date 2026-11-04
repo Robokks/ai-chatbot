@@ -52,6 +52,7 @@ class ModelPill extends StatelessWidget {
 
 /// "claude-sonnet-5-5" → "Claude Sonnet 5.5"; other ids are returned as is.
 String prettyModel(String id) {
+  if (id.startsWith('source:') && id.contains('::')) id = id.substring(id.indexOf('::') + 2);
   // Home-server and OpenRouter ids look like "anthropic/claude-sonnet-5-5".
   if (id.contains('/')) id = id.substring(id.lastIndexOf('/') + 1);
   final m = RegExp(r'^claude-([a-z]+)-(\d+)(?:-(\d+))?$').firstMatch(id);
@@ -104,6 +105,14 @@ class _ModelList extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
           child: Text('Choose a model', style: serif(context, size: 22)),
         ),
+        if (state.labRole != LabRole.client)
+          for (final source in state.sources.all.where((s) => s.enabled)) ...[
+            Padding(padding: const EdgeInsets.fromLTRB(8, 16, 8, 6), child: Text(source.name,
+              style: const TextStyle(fontWeight: FontWeight.w600))),
+            for (final model in source.models)
+              ListTile(title: Text(model), selected: state.provider == source.kind && state.model == source.route(model),
+                onTap: () { state.selectModel(source.kind, source.route(model)); Navigator.pop(context); }),
+          ],
         for (final k in kinds) ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 16, 8, 6),
