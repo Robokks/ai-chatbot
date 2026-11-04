@@ -4,6 +4,7 @@ import '../../data/llm/named_sources.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
 import '../host/widgets.dart';
+import 'source_controls_widgets.dart';
 
 class SourcesScreen extends StatelessWidget {
   const SourcesScreen({super.key});
@@ -83,6 +84,11 @@ class SourcesScreen extends StatelessWidget {
                   spacing: 8,
                   children: [
                     TextButton(
+                      onPressed: () =>
+                          editSourceQuota(context, catalog, source),
+                      child: const Text('Configure limits'),
+                    ),
+                    TextButton(
                       onPressed: () => showDialog<void>(
                         context: context,
                         builder: (_) =>
@@ -148,11 +154,14 @@ class _SourceEditorState extends State<_SourceEditor> {
   late bool _requestUsage = widget.existing?.requestUsage ?? true;
   bool _busy = false;
   String? _error;
+  SourcePreset? _preset;
+  final _account = TextEditingController();
   @override
   void dispose() {
     _name.dispose();
     _url.dispose();
     _key.dispose();
+    _account.dispose();
     _models.dispose();
     super.dispose();
   }
@@ -167,7 +176,9 @@ class _SourceEditorState extends State<_SourceEditor> {
       final source = NamedSource(
         id: _id,
         name: _name.text.trim(),
-        url: _url.text.trim(),
+        url: _preset?.accountRequired == true
+            ? _preset!.urlFor(_account.text.trim())
+            : _url.text.trim(),
         kind: _kind,
         models: _models.text
             .split('\n')
@@ -176,6 +187,9 @@ class _SourceEditorState extends State<_SourceEditor> {
             .toSet()
             .toList(),
         requestUsage: _requestUsage,
+        modelOptions: widget.existing?.modelOptions,
+        quota: widget.existing?.quota,
+        keyQuotas: widget.existing?.keyQuotas,
         enabled: widget.existing?.enabled ?? true,
         shared: widget.existing?.shared ?? false,
       );
@@ -214,6 +228,33 @@ class _SourceEditorState extends State<_SourceEditor> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (widget.existing == null)
+                DropdownButtonFormField<SourcePreset>(
+                  decoration: const InputDecoration(
+                    labelText: 'Provider preset (optional)',
+                  ),
+                  items: [
+                    for (final p in SourcePreset.all)
+                      DropdownMenuItem(value: p, child: Text(p.name)),
+                  ],
+                  onChanged: (p) {
+                    if (p != null) {
+                      setState(() {
+                        _preset = p;
+                        _kind = p.kind;
+                        _name.text = p.name;
+                        _url.text = p.baseUrl;
+                      });
+                    }
+                  },
+                ),
+              if (_preset?.accountRequired == true)
+                TextFormField(
+                  controller: _account,
+                  decoration: const InputDecoration(
+                    labelText: 'Cloudflare account ID',
+                  ),
+                ),
               TextFormField(
                 controller: _name,
                 decoration: const InputDecoration(labelText: 'Source name'),
@@ -222,6 +263,7 @@ class _SourceEditorState extends State<_SourceEditor> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<ProviderKind>(
+                key: ValueKey(_kind),
                 initialValue: _kind,
                 decoration: const InputDecoration(labelText: 'API format'),
                 items: [
@@ -255,7 +297,9 @@ class _SourceEditorState extends State<_SourceEditor> {
                   labelText: 'API base URL',
                   hintText: 'http://localhost:PORT/v1',
                 ),
-                validator: (v) => v == null || v.trim().isEmpty
+                validator: (v) => _preset?.accountRequired == true
+                    ? null
+                    : v == null || v.trim().isEmpty
                     ? 'Enter the API base URL'
                     : null,
               ),

@@ -191,25 +191,67 @@ void main() {
       expect(attempts.length, 1);
     }
   });
-  test('rejects cross format chains to preserve signed tool history', () async {
-    await catalog.save(
-      NamedSource(
-        id: 'native',
-        name: 'Native',
-        url: 'https://gemini.test',
-        kind: ProviderKind.gemini,
-        models: ['g'],
-      ),
-    );
-    await expectLater(
-      catalog.saveChain(
-        RoutingChain(
-          id: 'mixed',
-          name: 'Mixed',
-          routes: ['source:s::first', 'source:native::g'],
+  test(
+    'mixed chains fallback across formats but pin native tool history',
+    () async {
+      await catalog.save(
+        NamedSource(
+          id: 'native',
+          name: 'Native',
+          url: 'https://gemini.test',
+          kind: ProviderKind.gemini,
+          models: ['g'],
         ),
-      ),
-      throwsFormatException,
-    );
-  });
+      );
+      final mixed = RoutingChain(
+        id: 'mixed',
+        name: 'Mixed',
+        routes: ['source:s::first', 'source:native::g'],
+      );
+      await catalog.saveChain(mixed);
+      expect(catalog.kindForChain(mixed), ProviderKind.custom);
+      run = (key, request) async* {
+        if (request.model == 'first') throw LlmException('Unavailable');
+        yield const ChatDelta(text: 'native answer');
+      };
+      var provider = catalog.routingProvider(mixed.route);
+      var output = await provider
+          .streamChat(ChatRequest(model: mixed.route, messages: []))
+          .toList();
+      provider.client.close();
+      expect(
+        output.where((d) => d.text.isNotEmpty).single.text,
+        'native answer',
+      );
+      expect(
+        output.where((d) => d.providerKind != null).single.providerKind,
+        ProviderKind.gemini,
+      );
+      attempts.clear();
+      provider = catalog.routingProvider(mixed.route);
+      output = await provider
+          .streamChat(
+            ChatRequest(
+              model: mixed.route,
+              messages: [
+                Message(
+                  role: Role.assistant,
+                  provider: ProviderKind.gemini,
+                  providerBlocks: [
+                    {'thoughtSignature': 'native-only'},
+                  ],
+                  toolCalls: [ToolCall(id: 't', name: 'read', arguments: {})],
+                ),
+              ],
+            ),
+          )
+          .toList();
+      provider.client.close();
+      expect(attempts, ['/g']);
+      expect(
+        output.where((d) => d.providerKind != null).single.providerKind,
+        ProviderKind.gemini,
+      );
+    },
+  );
 }

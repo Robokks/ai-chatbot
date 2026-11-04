@@ -7,10 +7,30 @@ import '../../state/app_state.dart';
 import '../host/widgets.dart';
 import '../settings/local_models_screen.dart';
 import 'sources_screen.dart';
+import 'source_controls_widgets.dart';
 
-class ModelsScreen extends StatelessWidget {
+class ModelsScreen extends StatefulWidget {
   const ModelsScreen({super.key, this.onChat});
   final VoidCallback? onChat;
+  @override
+  State<ModelsScreen> createState() => _ModelsScreenState();
+}
+
+class _ModelsScreenState extends State<ModelsScreen> {
+  String search = '';
+  bool vision = false, tools = false;
+  int contextMinimum = 0;
+  bool matches(NamedSource source, String model) {
+    final options = source.modelOptions[model];
+    return '${source.name} $model'.toLowerCase().contains(
+          search.toLowerCase(),
+        ) &&
+        (!vision || options?.vision == true) &&
+        (!tools || options?.tools == true) &&
+        (contextMinimum == 0 ||
+            (options?.contextTokens ?? 0) >= contextMinimum);
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
@@ -86,7 +106,7 @@ class ModelsScreen extends StatelessWidget {
                             state.sources.kindForChain(chain),
                             chain.route,
                           );
-                          onChat?.call();
+                          widget.onChat?.call();
                         },
                         child: const Text('Use Auto in chat'),
                       ),
@@ -109,6 +129,42 @@ class ModelsScreen extends StatelessWidget {
                 ],
               ),
             const SectionTitle('Named sources'),
+            TextField(
+              decoration: const InputDecoration(
+                labelText: 'Search models or sources',
+                prefixIcon: Icon(Icons.search),
+              ),
+              onChanged: (v) => setState(() => search = v),
+            ),
+            Wrap(
+              spacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                FilterChip(
+                  label: const Text('Vision'),
+                  selected: vision,
+                  onSelected: (v) => setState(() => vision = v),
+                ),
+                FilterChip(
+                  label: const Text('Tools'),
+                  selected: tools,
+                  onSelected: (v) => setState(() => tools = v),
+                ),
+                DropdownButton<int>(
+                  value: contextMinimum,
+                  items: const [
+                    DropdownMenuItem(value: 0, child: Text('Any context')),
+                    DropdownMenuItem(value: 32000, child: Text('32K+')),
+                    DropdownMenuItem(value: 128000, child: Text('128K+')),
+                    DropdownMenuItem(value: 1000000, child: Text('1M+')),
+                  ],
+                  onChanged: (v) => setState(() => contextMinimum = v ?? 0),
+                ),
+              ],
+            ),
+            const Text(
+              'Capability filters use your confirmed metadata. Unknown models are excluded from active filters.',
+            ),
             if (state.sources.all.isEmpty)
               const Text(
                 'Add FreeLLMAPI or another named source using AI sources.',
@@ -125,20 +181,55 @@ class ModelsScreen extends StatelessWidget {
                       state.sources.save(source);
                     },
                   ),
-                  for (final model in source.models)
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Text(state.sources.quotaSummary(source)),
+                  ),
+                  if (source.quota.tokens != null)
+                    LinearProgressIndicator(
+                      value:
+                          (state.sources.quotaWindow(source).tokens /
+                                  source.quota.tokens!)
+                              .clamp(0.0, 1.0),
+                    ),
+                  TextButton(
+                    onPressed: () =>
+                        editSourceQuota(context, state.sources, source),
+                    child: const Text('Configure limits'),
+                  ),
+                  for (final model in source.models.where(
+                    (m) => matches(source, m),
+                  ))
                     ListTile(
+                      leading: Switch(
+                        value: source.modelEnabled(model),
+                        onChanged: (v) {
+                          (source.modelOptions[model] ??= ModelOptions())
+                                  .enabled =
+                              v;
+                          state.sources.save(source);
+                        },
+                      ),
                       title: Text(model),
                       subtitle: Text(
-                        _health(state.sources.metrics[source.route(model)]),
+                        '${_health(state.sources.metrics[source.route(model)])}\nVision: ${source.modelOptions[model]?.vision ?? "unknown"} · Tools: ${source.modelOptions[model]?.tools ?? "unknown"} · Context: ${source.modelOptions[model]?.contextTokens ?? "unknown"}',
+                      ),
+                      onTap: () => editModelOptions(
+                        context,
+                        state.sources,
+                        source,
+                        model,
                       ),
                       trailing: TextButton(
-                        onPressed: () async {
-                          await state.selectModel(
-                            source.kind,
-                            source.route(model),
-                          );
-                          if (context.mounted) onChat?.call();
-                        },
+                        onPressed: !source.modelEnabled(model)
+                            ? null
+                            : () async {
+                                await state.selectModel(
+                                  source.kind,
+                                  source.route(model),
+                                );
+                                if (context.mounted) widget.onChat?.call();
+                              },
                         child: const Text('Use in chat'),
                       ),
                     ),
@@ -240,10 +331,10 @@ class _ChainEditorState extends State<_ChainEditor> {
               },
             ),
             const Text(
-              'Select models in fallback order. Use one API format per chain to preserve conversation and tool history. Higher priority means smarter in your judgement.',
+              'Select models in fallback order. Text-only chats can cross providers. Conversations with native thinking or tool history stay with that provider format. Higher priority means smarter in your judgement.',
             ),
             for (final source in widget.catalog.all.where((s) => s.enabled))
-              for (final model in source.models)
+              for (final model in source.enabledModels)
                 CheckboxListTile(
                   title: Text('${source.name} · $model'),
                   subtitle: Text(

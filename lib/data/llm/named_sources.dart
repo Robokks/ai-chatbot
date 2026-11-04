@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import '../../core/storage.dart';
 import '../models.dart';
 import 'llm_provider.dart';
+import 'source_controls.dart';
+export 'source_controls.dart';
 
 class NamedSource {
   NamedSource({
@@ -18,7 +20,13 @@ class NamedSource {
     this.enabled = true,
     this.shared = false,
     this.requestUsage = true,
-  }) : models = models ?? [];
+    Map<String, ModelOptions>? modelOptions,
+    QuotaPolicy? quota,
+    Map<int, QuotaPolicy>? keyQuotas,
+  }) : models = models ?? [],
+       modelOptions = modelOptions ?? {},
+       quota = quota ?? QuotaPolicy(),
+       keyQuotas = keyQuotas ?? {};
   final String id;
   String name;
   String url;
@@ -27,6 +35,12 @@ class NamedSource {
   bool enabled;
   bool shared;
   bool requestUsage;
+  final Map<String, ModelOptions> modelOptions;
+  QuotaPolicy quota;
+  final Map<int, QuotaPolicy> keyQuotas;
+  bool modelEnabled(String model) =>
+      models.contains(model) && (modelOptions[model]?.enabled ?? true);
+  Iterable<String> get enabledModels => models.where(modelEnabled);
   String route(String model) => 'source:$id::$model';
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -37,6 +51,9 @@ class NamedSource {
     'enabled': enabled,
     'shared': shared,
     'requestUsage': requestUsage,
+    'options': modelOptions.map((k, v) => MapEntry(k, v.toJson())),
+    'quota': quota.toJson(),
+    'keyQuotas': keyQuotas.map((k, v) => MapEntry('$k', v.toJson())),
   };
   factory NamedSource.fromJson(Map<String, dynamic> j) => NamedSource(
     id: j['id'] as String,
@@ -47,6 +64,19 @@ class NamedSource {
     enabled: j['enabled'] as bool? ?? true,
     shared: j['shared'] as bool? ?? false,
     requestUsage: j['requestUsage'] as bool? ?? true,
+    modelOptions: (j['options'] as Map? ?? {}).map(
+      (k, v) => MapEntry(
+        k as String,
+        ModelOptions.fromJson(Map<String, dynamic>.from(v)),
+      ),
+    ),
+    quota: QuotaPolicy.fromJson(Map<String, dynamic>.from(j['quota'] ?? {})),
+    keyQuotas: (j['keyQuotas'] as Map? ?? {}).map(
+      (k, v) => MapEntry(
+        int.parse(k),
+        QuotaPolicy.fromJson(Map<String, dynamic>.from(v)),
+      ),
+    ),
   );
 }
 
@@ -55,8 +85,12 @@ class NamedSources extends ChangeNotifier {
   NamedSources(
     this.storage, {
     LlmProvider Function(ProviderSettings, String)? factory,
-  }) : factory = factory ?? ((s, key) => LlmProvider.create(s, key));
+    DateTime Function()? clock,
+  }) : clock = clock ?? DateTime.now,
+       factory = factory ?? ((s, key) => LlmProvider.create(s, key));
   final Storage storage;
+  final DateTime Function() clock;
+  final Map<String, QuotaWindow> quotaUsage = {};
   final LlmProvider Function(ProviderSettings, String) factory;
   final List<NamedSource> all = [];
   final Map<String, List<String>> _keys = {};
@@ -72,12 +106,14 @@ class NamedSources extends ChangeNotifier {
   final Map<String, DateTime> _cooldown = {};
   Duration firstOutputTimeout = const Duration(seconds: 15);
 
-  ProviderKind kindForChain(RoutingChain chain) =>
-      all
-          .where((s) => chain.routes.any((r) => r.startsWith(s.route(''))))
-          .firstOrNull
-          ?.kind ??
-      ProviderKind.custom;
+  ProviderKind kindForChain(RoutingChain chain) {
+    final kinds = all
+        .where((s) => chain.routes.any((r) => r.startsWith(s.route(''))))
+        .map((s) => s.kind)
+        .toSet();
+    return kinds.length == 1 ? kinds.single : ProviderKind.custom;
+  }
+
   RoutingChain? chainFor(String route) =>
       chains.where((c) => c.route == route).firstOrNull;
   Future<void> saveChain(RoutingChain chain) async {
@@ -97,11 +133,8 @@ class NamedSources extends ChangeNotifier {
               .firstOrNull,
         )
         .toList();
-    if (sources.any((s) => s == null) ||
-        sources.map((s) => s!.kind).toSet().length != 1) {
-      throw const FormatException(
-        'Choose models using the same API format to preserve tool history.',
-      );
+    if (sources.any((s) => s == null)) {
+      throw const FormatException('Choose available models for this chain.');
     }
     chains.removeWhere((c) => c.id == chain.id);
     chains.add(chain);
@@ -117,6 +150,7 @@ class NamedSources extends ChangeNotifier {
     await storage.setSetting(
       'lab.routing',
       jsonEncode({
+        'quotas': quotaUsage.map((k, v) => MapEntry(k, v.toJson())),
         'chains': chains.map((c) => c.toJson()).toList(),
         'metrics': metrics.map((k, v) => MapEntry(k, v.toJson())),
         'keys': keyUsage.map((k, v) => MapEntry(k, v.toJson())),
@@ -137,7 +171,7 @@ class NamedSources extends ChangeNotifier {
             (s) =>
                 s.enabled &&
                 r.startsWith(s.route('')) &&
-                s.models.contains(r.substring(s.route('').length)),
+                s.modelEnabled(r.substring(s.route('').length)),
           ),
         )
         .toList();
@@ -168,8 +202,14 @@ class NamedSources extends ChangeNotifier {
     metrics.clear();
     keyUsage.clear();
     _cooldown.clear();
+    quotaUsage.clear();
     if (routing != null) {
       final data = jsonDecode(routing) as Map;
+      (data['quotas'] as Map? ?? {}).forEach(
+        (k, v) => quotaUsage[k as String] = QuotaWindow.fromJson(
+          Map<String, dynamic>.from(v),
+        ),
+      );
       chains.addAll(
         (data['chains'] as List).map(
           (j) => RoutingChain.fromJson(Map<String, dynamic>.from(j)),
@@ -205,6 +245,15 @@ class NamedSources extends ChangeNotifier {
   }
 
   static void validate(NamedSource source) {
+    source.quota.validate();
+    for (final policy in source.keyQuotas.values) {
+      policy.validate();
+    }
+    if (source.modelOptions.values.any(
+      (m) => m.contextTokens != null && m.contextTokens! < 1,
+    )) {
+      throw const FormatException('Context size must be positive.');
+    }
     final uri = Uri.tryParse(source.url);
     if (source.name.trim().isEmpty ||
         source.id.isEmpty ||
@@ -241,6 +290,7 @@ class NamedSources extends ChangeNotifier {
       if (!listEquals(_keys[source.id], cleaned)) {
         _nextKey.remove(source.id);
         keyUsage.removeWhere((id, _) => id.startsWith('${source.id}:'));
+        quotaUsage.removeWhere((id, _) => id.startsWith('key:${source.id}:'));
         _cooldown.removeWhere((id, _) => id.startsWith('${source.id}:'));
       }
       _keys[source.id] = cleaned;
@@ -263,6 +313,13 @@ class NamedSources extends ChangeNotifier {
     all.removeWhere((s) => s.id == source.id);
     _keys.remove(source.id);
     health.remove(source.id);
+    quotaUsage.removeWhere(
+      (k, _) => k == 'source:${source.id}' || k.startsWith('key:${source.id}:'),
+    );
+    metrics.removeWhere((k, _) => k.startsWith(source.route('')));
+    keyUsage.removeWhere((k, _) => k.startsWith('${source.id}:'));
+    _cooldown.removeWhere((k, _) => k.startsWith('${source.id}:'));
+    await _saveRouting();
     await storage.setSetting(
       'lab.sources',
       jsonEncode(all.map((s) => s.toJson()).toList()),
@@ -272,6 +329,95 @@ class NamedSources extends ChangeNotifier {
   }
 
   int keyCount(NamedSource source) => _keys[source.id]?.length ?? 0;
+  QuotaWindow quotaWindow(NamedSource source, [int? key]) {
+    final policy = key == null
+        ? source.quota
+        : source.keyQuotas[key] ?? QuotaPolicy();
+    final id = key == null ? 'source:${source.id}' : 'key:${source.id}:$key';
+    final now = clock().toUtc().millisecondsSinceEpoch ~/ 1000;
+    final start = now ~/ policy.windowSeconds * policy.windowSeconds;
+    var entry = quotaUsage[id];
+    if (entry == null ||
+        entry.start != start ||
+        entry.seconds != policy.windowSeconds) {
+      entry = quotaUsage[id] = QuotaWindow(
+        start: start,
+        seconds: policy.windowSeconds,
+      );
+    }
+    return entry;
+  }
+
+  String quotaSummary(NamedSource source, [int? key]) {
+    final policy = key == null
+        ? source.quota
+        : source.keyQuotas[key] ?? QuotaPolicy();
+    final used = quotaWindow(source, key);
+    final reset = DateTime.fromMillisecondsSinceEpoch(
+      (used.start + used.seconds) * 1000,
+      isUtc: true,
+    ).toLocal();
+    return '${used.requests}/${policy.requests ?? "∞"} requests · ${used.tokens}/${policy.tokens ?? "∞"} tokens charged · resets $reset${used.unknown > 0 ? " · ${used.unknown} calls have unreported usage; reservations retained" : ""}';
+  }
+
+  _QuotaReservation? _reserve(
+    NamedSource source,
+    int key,
+    ChatRequest request,
+  ) {
+    final policies = [source.quota, source.keyQuotas[key] ?? QuotaPolicy()];
+    final windows = [quotaWindow(source), quotaWindow(source, key)];
+    int? remaining;
+    for (var i = 0; i < policies.length; i++) {
+      final p = policies[i], w = windows[i];
+      if (p.requests != null && w.requests >= p.requests!) return null;
+      if (p.tokens != null) {
+        if (w.unknown > 0) return null;
+        final available = p.tokens! - w.tokens;
+        remaining = remaining == null || available < remaining
+            ? available
+            : remaining;
+      }
+    }
+    // UTF-8 JSON byte size bounds text tokenization conservatively. Binary content
+    // adds its base64-sized budget; extra overhead covers tool/provider framing.
+    final input =
+        utf8
+            .encode(
+              jsonEncode({
+                'messages': request.messages.map((m) => m.toJson()).toList(),
+                'system': request.systemPrompt,
+                'tools': request.tools
+                    .map(
+                      (t) => {
+                        'name': t.name,
+                        'description': t.description,
+                        'schema': t.inputSchema,
+                      },
+                    )
+                    .toList(),
+              }),
+            )
+            .length +
+        request.messages
+            .expand((m) => m.attachments)
+            .fold<int>(0, (n, a) => n + ((a.bytes?.length ?? a.size) * 2)) +
+        8192;
+    if (remaining != null && remaining <= input) return null;
+    final output = remaining == null
+        ? request.maxOutputTokens
+        : (request.maxOutputTokens == null ||
+                  request.maxOutputTokens! > remaining - input
+              ? remaining - input
+              : request.maxOutputTokens);
+    final charge = remaining ?? 0;
+    for (final w in windows) {
+      w.requests++;
+      w.tokens += charge;
+    }
+    return _QuotaReservation(windows, charge, output);
+  }
+
   Future<void> check(NamedSource source) async {
     final provider = factory(
       ProviderSettings(kind: source.kind, baseUrl: source.url),
@@ -305,7 +451,7 @@ class NamedSources extends ChangeNotifier {
   LlmProvider provider(NamedSource source, String route) {
     if (!source.enabled) throw LlmException('This source is disabled.');
     final model = route.substring(source.route('').length);
-    if (!source.models.contains(model)) {
+    if (!source.modelEnabled(model)) {
       throw LlmException('This model is not available from the source.');
     }
     return _RoutingProvider(this, [route]);
@@ -390,7 +536,14 @@ class _RoutingClient extends http.BaseClient {
 class _RoutingProvider extends LlmProvider {
   _RoutingProvider(this.catalog, this.routes)
     : super(
-        settings: ProviderSettings(kind: catalog.all.where((s) => routes.any((r) => r.startsWith(s.route('')))).firstOrNull?.kind ?? ProviderKind.custom),
+        settings: ProviderSettings(
+          kind:
+              catalog.all
+                  .where((s) => routes.any((r) => r.startsWith(s.route(''))))
+                  .firstOrNull
+                  ?.kind ??
+              ProviderKind.custom,
+        ),
         apiKey: '',
         client: _RoutingClient(),
       );
@@ -403,30 +556,64 @@ class _RoutingProvider extends LlmProvider {
   Stream<ChatDelta> streamChat(ChatRequest request) async* {
     Object? last;
     var fallbacks = 0;
+    final protectedHistory = request.messages.reversed
+        .where(
+          (m) =>
+              m.role == Role.assistant &&
+              ((m.providerBlocks?.isNotEmpty ?? false) ||
+                  m.toolCalls.isNotEmpty),
+        )
+        .firstOrNull;
+    final pinnedKind = protectedHistory?.provider;
     for (final route in routes) {
       final source = catalog.all
           .where((s) => route.startsWith(s.route('')))
           .first;
+      if (protectedHistory != null &&
+          (pinnedKind == null || source.kind != pinnedKind)) {
+        continue;
+      }
       final keys = catalog._keys[source.id] ?? [''];
       final available = keys.isEmpty ? [''] : keys;
       final start = catalog._nextKey[source.id] ?? 0;
       for (var attempt = 0; attempt < available.length; attempt++) {
         if (transport.closed) return;
+        if (!source.enabled ||
+            !source.modelEnabled(route.substring(source.route('').length))) {
+          break;
+        }
         final index = (start + attempt) % available.length;
         final keyId = '${source.id}:$index';
         if (catalog._cooldown[keyId]?.isAfter(DateTime.now()) ?? false) {
           continue;
         }
+        final reservation = catalog._reserve(source, index, request);
+        if (reservation == null) continue;
+        await catalog._saveRouting();
+        if (transport.closed ||
+            !source.enabled ||
+            !source.modelEnabled(route.substring(source.route('').length))) {
+          reservation.release();
+          await catalog._saveRouting();
+          return;
+        }
         catalog._nextKey[source.id] = (index + 1) % available.length;
-        final delegate = catalog.factory(
-          ProviderSettings(
-            kind: source.kind,
-            baseUrl: source.url,
-            models: source.models,
-            requestUsage: source.requestUsage,
-          ),
-          available[index],
-        );
+        late final LlmProvider delegate;
+        try {
+          delegate = catalog.factory(
+            ProviderSettings(
+              kind: source.kind,
+              baseUrl: source.url,
+              models: source.models,
+              requestUsage: source.requestUsage,
+            ),
+            available[index],
+          );
+        } catch (_) {
+          reservation.release();
+          await catalog._saveRouting();
+          rethrow;
+        }
         transport.active = delegate.client;
         final stats = catalog.metrics.putIfAbsent(route, RouteHealth.new);
         final keyStats = catalog.keyUsage.putIfAbsent(keyId, RouteHealth.new);
@@ -440,7 +627,7 @@ class _RoutingProvider extends LlmProvider {
               messages: request.messages,
               systemPrompt: request.systemPrompt,
               tools: request.tools,
-              maxOutputTokens: request.maxOutputTokens,
+              maxOutputTokens: reservation.outputLimit,
             ),
           ),
         );
@@ -465,6 +652,7 @@ class _RoutingProvider extends LlmProvider {
                   ? watch.elapsedMilliseconds.toDouble()
                   : (stats.firstMs! * 0.75 + watch.elapsedMilliseconds * 0.25);
               yield ChatDelta(
+                providerKind: source.kind,
                 routingInfo:
                     'Answered by ${source.name} · ${route.substring(source.route('').length)} · $fallbacks fallbacks',
               );
@@ -494,6 +682,7 @@ class _RoutingProvider extends LlmProvider {
           if (emitted) rethrow;
           fallbacks++;
         } finally {
+          reservation.settle(usage);
           stats.inputTokens += usage.inputTokens ?? 0;
           stats.outputTokens += usage.outputTokens ?? 0;
           keyStats.inputTokens += usage.inputTokens ?? 0;
@@ -506,8 +695,36 @@ class _RoutingProvider extends LlmProvider {
     }
     throw LlmException(
       last == null
-          ? 'No available models or keys. Check sources and retry after cooldown.'
+          ? 'No available models or keys. Check configured quotas, enabled models and key cooldowns.'
           : 'All configured routes failed. Check source health.',
     );
+  }
+}
+
+class _QuotaReservation {
+  _QuotaReservation(this.windows, this.charged, this.outputLimit);
+  final List<QuotaWindow> windows;
+  final int charged;
+  final int? outputLimit;
+  void release() {
+    for (final w in windows) {
+      w.requests--;
+      w.tokens -= charged;
+    }
+  }
+
+  void settle(UsageStats usage) {
+    final known =
+        usage.inputTokens != null &&
+        usage.outputTokens != null &&
+        usage.inputTokens! >= 0 &&
+        usage.outputTokens! >= 0;
+    for (final w in windows) {
+      if (known) {
+        w.tokens += usage.inputTokens! + usage.outputTokens! - charged;
+      } else {
+        w.unknown++;
+      }
+    }
   }
 }

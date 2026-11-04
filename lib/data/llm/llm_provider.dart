@@ -15,6 +15,7 @@ class ChatDelta {
     this.reasoning = '',
     this.notice,
     this.routingInfo,
+    this.providerKind,
     this.status,
     this.usage,
     this.toolCalls = const [],
@@ -28,6 +29,8 @@ class ChatDelta {
 
   /// Actual selected source and number of pre-output fallbacks.
   final String? routingInfo;
+  /// Actual backend selected by an Auto route, preserved for native tool replay.
+  final ProviderKind? providerKind;
 
   /// Transient progress shown while waiting for output (e.g. loading a model).
   final String? status;
