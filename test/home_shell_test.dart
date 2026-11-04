@@ -58,7 +58,7 @@ void main() {
           find.descendant(of: menu, matching: find.text('Clients')),
         );
         await tester.pumpAndSettle();
-        expect(find.text('Coming soon'), findsOneWidget);
+        expect(find.text('Stop all'), findsOneWidget);
         await tester.tap(
           find.descendant(of: menu, matching: find.text('Tools')),
         );

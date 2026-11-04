@@ -14,6 +14,9 @@ import '../data/lab_role.dart';
 import '../server/discovery.dart';
 import '../server/host_controller.dart';
 import '../tools/tool_registry.dart';
+import '../tools/tool_source.dart';
+import '../tools/mcp_source.dart';
+import '../server/client_connection.dart';
 
 const demoMode = bool.fromEnvironment('DEMO');
 
@@ -29,6 +32,7 @@ class AppState extends ChangeNotifier {
         tools = tools ?? ToolRegistry(storage) {
     _providerFactory = providerFactory ?? _defaultProvider;
     this.localModels.addListener(_syncLocalModels);
+    this.tools.hostWeb = _hostWeb;
   }
 
   final Storage storage;
@@ -172,16 +176,34 @@ class AppState extends ChangeNotifier {
     );
     providers[ProviderKind.network] = settings;
     await setKey(ProviderKind.network, key);
-    settings.models = await LlmProvider.create(settings, key).listModels();
     await updateProviderSettings(settings);
     await storage.setSetting('network.hostName', hostName);
+    try { await refreshHostModels(); }
+    on LlmException catch (e) { if (e.statusCode != 403) rethrow; }
     if (settings.models.isNotEmpty) await selectModel(ProviderKind.network, settings.models.first);
+  }
+
+  Future<ToolOutput> _hostWeb(String tool, Map<String, dynamic> args) async {
+    if (labRole != LabRole.client && labRole != LabRole.relay) return tools.builtin.call(tool, args);
+    if (!hasKey(ProviderKind.network)) return const ToolOutput('Connect to Main and request web access first.', isError: true);
+    final settings = providers[ProviderKind.network]!;
+    final connection = ClientConnection(settings.baseUrl, keyFor(ProviderKind.network));
+    try {
+      final access = await connection.access();
+      final port = access['mcpPort'] as int?;
+      if (port == null) return const ToolOutput('MCP sharing is unavailable on Main.', isError: true);
+      final uri = Uri.parse(settings.baseUrl).replace(port: port, path: '/mcp', query: '', fragment: '');
+      final source = McpToolSource(ToolSourceConfig(id: 'main-web', type: ToolSourceType.mcp,
+        name: 'Main web', url: uri.toString()), keyFor(ProviderKind.network));
+      try { return await source.call(tool, args); } finally { await source.close(); }
+    } finally { connection.close(); }
   }
 
   /// Refreshes the shared model list from the paired host.
   Future<void> refreshHostModels() async {
     final s = providers[ProviderKind.network]!;
-    s.models = await LlmProvider.create(s, keyFor(ProviderKind.network)).listModels();
+    final provider = LlmProvider.create(s, keyFor(ProviderKind.network));
+    try { s.models = await provider.listModels(); } finally { provider.client.close(); }
     await updateProviderSettings(s);
   }
 
@@ -205,6 +227,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> selectModel(ProviderKind k, String m) async {
+    if (labRole == LabRole.client && k != ProviderKind.network) return;
     provider = k;
     model = m;
     await storage.setSetting('provider', k.name);
@@ -321,6 +344,11 @@ class AppState extends ChangeNotifier {
   Future<void> _reply(Conversation c) async {
     _stopped = false;
     _bumpToTop(c);
+    if (labRole == LabRole.client) {
+      provider = ProviderKind.network;
+      final models = providers[ProviderKind.network]!.models;
+      if (!models.contains(model)) model = models.firstOrNull ?? '';
+    }
     for (var round = 0;; round++) {
       final reply = Message(
           role: Role.assistant, model: model, provider: provider, usage: UsageStats());
@@ -331,6 +359,10 @@ class AppState extends ChangeNotifier {
       streamingMessage = reply;
       notifyListeners();
 
+      if (labRole == LabRole.client && (!hasKey(ProviderKind.network) || model.isEmpty)) {
+        reply.error = 'Connect to Main and request access to a model first.';
+        return _finish(c);
+      }
       if (!hasKey(provider)) {
         reply.error = provider == ProviderKind.local
             ? 'Download an on-device model in Settings first.'

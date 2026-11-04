@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../data/lab_role.dart';
 import '../../state/app_state.dart';
 import '../host/connect_screen.dart';
 import '../settings/local_models_screen.dart';
@@ -84,7 +85,8 @@ class _ModelList extends StatelessWidget {
     final p = Palette.of(context);
     final accent = Theme.of(context).colorScheme.primary;
     final available = ProviderKind.values.where(
-      (k) => k != ProviderKind.local || AppState.localSupported,
+      (k) => state.labRole == LabRole.client ? k == ProviderKind.network
+          : k != ProviderKind.local || AppState.localSupported,
     );
     final kinds = [
       ...available.where(state.hasKey),

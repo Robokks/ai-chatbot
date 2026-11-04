@@ -8,6 +8,9 @@ import '../chat/chat_screen.dart';
 import '../sidebar/sidebar.dart';
 import '../settings/settings_screen.dart';
 import '../tools/tools_screen.dart';
+import '../lab/clients_screen.dart';
+import '../lab/logs_screen.dart';
+import '../lab/client_status_bar.dart';
 
 /// Conversation drawer on phones, app menu and chat history on wide screens.
 class HomeShell extends StatefulWidget {
@@ -103,7 +106,9 @@ class _HomeShellState extends State<HomeShell> {
           Expanded(
             child: switch (_selectedPage) {
               0 => const ChatScreen(),
+              2 => const ClientsScreen(),
               3 => const ToolsScreen(),
+              4 => const LogsScreen(),
               5 => const SettingsScreen(),
               _ => Scaffold(
                 appBar: AppBar(title: Text(_pages[_selectedPage])),
@@ -142,7 +147,11 @@ class _HomeShellState extends State<HomeShell> {
                   width: MediaQuery.sizeOf(context).width * 0.84,
                   child: Sidebar(onNavigate: () => Navigator.of(context).pop()),
                 ),
-          body: content,
+          body: Column(children: [
+            if (state.labRole == LabRole.client || state.labRole == LabRole.relay)
+              const SafeArea(bottom: false, child: ClientStatusBar()),
+            Expanded(child: content),
+          ]),
         ),
       ),
     );

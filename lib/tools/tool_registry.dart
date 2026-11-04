@@ -31,6 +31,7 @@ class ToolRegistry extends ChangeNotifier {
 
   /// Web search, calculator, notes… always available, no setup.
   final BuiltinToolSource builtin;
+  Future<ToolOutput> Function(String, Map<String, dynamic>)? hostWeb;
 
   /// Built-in tools the user switched off.
   final Set<String> disabledBuiltins = {};
@@ -253,7 +254,9 @@ class ToolRegistry extends ChangeNotifier {
     final route = _routes[call.name];
     if (route?.$1 == builtinId) {
       try {
-        final out = await builtin.call(route!.$2, call.arguments).timeout(const Duration(minutes: 1));
+        final name = route!.$2;
+        final out = await (hostWeb != null && (name == 'web_search' || name == 'read_web_page')
+            ? hostWeb!(name, call.arguments) : builtin.call(name, call.arguments)).timeout(const Duration(minutes: 1));
         return ToolResult(callId: call.id, name: call.name, text: out.text, isError: out.isError);
       } catch (e) {
         return ToolResult(callId: call.id, name: call.name, text: 'Tool failed: ${_friendly(e)}', isError: true);

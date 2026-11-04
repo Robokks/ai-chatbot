@@ -6,6 +6,7 @@ import 'package:ai_chatbot/core/storage.dart';
 import 'package:ai_chatbot/data/llm/llm_provider.dart';
 import 'package:ai_chatbot/data/local/local_models.dart';
 import 'package:ai_chatbot/data/models.dart';
+import 'package:ai_chatbot/data/lab_role.dart';
 import 'package:ai_chatbot/state/app_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive_ce.dart';
@@ -141,4 +142,24 @@ void main() {
     await state.localModels.delete('LFM2-1.2B-Q4_K_M');
     expect(state.provider, isNot(ProviderKind.local));
   });
+  test('Client role routes chats only through Main', () async {
+    await state.setKey(ProviderKind.network, 'test-main-key');
+    await state.updateProviderSettings(ProviderSettings(kind: ProviderKind.network,
+      baseUrl: 'http://main.example/v1', models: ['local/one']));
+    await state.setLabRole(LabRole.client);
+    await state.send('Hi', []);
+    expect(fake.settings.kind, ProviderKind.network);
+    expect(fake.last!.model, 'local/one');
+    expect(state.current!.messages.last.error, isNull);
+    await state.selectModel(ProviderKind.anthropic, 'different');
+    expect(state.provider, ProviderKind.network);
+  });
+
+  test('Client role without approved models asks for access instead of using a cloud key', () async {
+    await state.setKey(ProviderKind.anthropic, 'test-cloud-key');
+    await state.setLabRole(LabRole.client);
+    await state.send('Hi', []);
+    expect(state.current!.messages.last.error, contains('Connect to Main'));
+  });
+
 }
